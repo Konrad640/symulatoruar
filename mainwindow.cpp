@@ -310,7 +310,7 @@ void MainWindow::krokSymulacji()
 {
     double dt_gui = interwalMs / 1000.0;
 
-    double dt_math = 1.0;
+    //double dt_math = 1.0;
 
     double czasRzeczywistyTarget = czasBazy + (licznikCzasuRzeczywistego.elapsed() / 1000.0);
 
@@ -326,7 +326,7 @@ void MainWindow::krokSymulacji()
 
         ost_w = gen.generuj(aktualnyCzas);
 
-        ost_y = petla.wykonaj_krok(ost_w, dt_math);
+        ost_y = petla.wykonaj_krok(ost_w, dt_gui); // zamiast dt_gui bylo dt_math
 
         ost_e = ost_w - ost_y;
 
@@ -451,7 +451,7 @@ void MainWindow::zresetujSymulacje()
     arx.zresetuj_stan();
     pid.zresetuj();
 
-    seriaZadana = nullptr;
+    //seriaZadana = nullptr; 1 błąd
 
     seriaZadana->clear();
     seriaWyjscie->clear();
@@ -527,7 +527,7 @@ void MainWindow::aktualizujInterwal()
     if (czyDziala) {
         timerSymulacji->setInterval(interwalMs);
 
-        aktualnyCzas = 0.0;
+       // aktualnyCzas = 0.0;
     }
 }
 
