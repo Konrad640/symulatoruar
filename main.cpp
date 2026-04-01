@@ -17,7 +17,7 @@ int main(int argc, char *argv[])
     } else {
         MainWindow w;
         w.setWindowTitle("Symulator UAR - Model ARX + PID");
-        w.resize(1600, 1000);
+        w.resize(1600, 700);
         w.show();
         return a.exec();
     }

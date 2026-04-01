@@ -15,6 +15,7 @@
 #include "ModelARX.h"
 #include "Petla_Sprzezenia.h"
 #include "RegulatorPID.h"
+#include "Sieci.h"
 
 class MainWindow : public QMainWindow
 {
@@ -22,6 +23,8 @@ class MainWindow : public QMainWindow
 
 public:
     MainWindow(QWidget *parent = nullptr);
+
+    Sieci sieci;
 
 private slots:
     void krokSymulacji();

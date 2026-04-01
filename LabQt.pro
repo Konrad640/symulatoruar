@@ -1,6 +1,4 @@
-QT       += core gui
-
-greaterThan(QT_MAJOR_VERSION, 4): QT += widgets charts
+QT       += core gui network widgets charts
 
 CONFIG += c++17
 
@@ -15,6 +13,7 @@ SOURCES += \
     Petla_Sprzezenia.cpp \
     ProstyUAR.cpp \
     RegulatorPID.cpp \
+    Sieci.cpp \
     TestRunner.cpp \
     Testy_UAR.cpp \
     main.cpp \
@@ -27,6 +26,7 @@ HEADERS += \
     Petla_Sprzezenia.h \
     ProstyUAR.h \
     RegulatorPID.h \
+    Sieci.h \
     TestRunner.h \
     mainwindow.h
 

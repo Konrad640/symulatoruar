@@ -26,8 +26,8 @@ MainWindow::MainWindow(QWidget *parent)
     // Generator: Prostokąt, Offset=0, Amp=1, T=10, Wyp=0.5, Akt=1.0
     gen(Generator::TypSygnalu::PROSTOKATNY, 0, 1, 10, 0.5, 1.0)
     , petla(arx, pid)
-    , aktualnyCzas(0.0)
     , czasBazy(0.0)
+    , aktualnyCzas(0.0)
     , // Inicjalizacja czasu bazy
     czyDziala(false)
     , interwalMs(200)
@@ -47,6 +47,8 @@ MainWindow::MainWindow(QWidget *parent)
     // Inicjalizacja zmiennych na podstawie wartości domyślnych kontrolek
     aktualizujOknoCzasowe();
     aktualizujInterwal();
+
+    sieci.start();
 }
 
 void MainWindow::konfigurujGUI()
@@ -58,7 +60,7 @@ void MainWindow::konfigurujGUI()
     glownyLayout->setContentsMargins(5, 5, 5, 5);
     glownyLayout->setSpacing(5);
 
-    //LEWY PANEL (KONTROLKI)
+    // LEWY PANEL (KONTROLKI)
     QWidget *lewyPanelContainer = new QWidget();
     QVBoxLayout *panelSterowania = new QVBoxLayout(lewyPanelContainer);
 
@@ -183,7 +185,7 @@ void MainWindow::konfigurujGUI()
     grpGen->setLayout(layoutGen);
     panelSterowania->addWidget(grpGen);
 
-    // JSON
+    // Grupa: JSON
     QPushButton *btnZapisz = new QPushButton("Zapisz Konfigurację (JSON)");
     QPushButton *btnWczytaj = new QPushButton("Wczytaj Konfigurację (JSON)");
     connect(btnZapisz, &QPushButton::clicked, this, &MainWindow::zapiszKonfiguracje);
@@ -191,8 +193,23 @@ void MainWindow::konfigurujGUI()
 
     panelSterowania->addWidget(btnZapisz);
     panelSterowania->addWidget(btnWczytaj);
-    panelSterowania->addStretch();
 
+    // Grupa: Sieci
+    QGroupBox *grpSieci = new QGroupBox("Sieci");
+    QHBoxLayout *layoutTrybSieci = new QHBoxLayout();
+    QPushButton *btnTrybRegulator = new QPushButton("Tryb regulatora");
+
+    QPushButton *btnTrybObiekt = new QPushButton("Tryb obiektu");
+    connect(btnTrybRegulator, &QPushButton::clicked, this, [&](){sieci.set_tryb(Sieci::Tryb::Regulator);});
+    connect(btnTrybObiekt, &QPushButton::clicked, this, [&](){sieci.set_tryb(Sieci::Tryb::Obiekt);});
+
+    layoutTrybSieci->addWidget(btnTrybRegulator);
+    layoutTrybSieci->addWidget(btnTrybObiekt);
+    grpSieci->setLayout(layoutTrybSieci);
+    panelSterowania->addWidget(grpSieci);
+
+    // KONCOWE DODANIE LEWEGO PANELU
+    panelSterowania->addStretch();
     glownyLayout->addWidget(lewyPanelContainer);
 
     // PRAWY PANEL (WYKRESY)
