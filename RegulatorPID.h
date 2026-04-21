@@ -1,6 +1,6 @@
 #ifndef REGULATORPID_H
 #define REGULATORPID_H
-#include "ProstyUAR.h"
+//#include "ProstyUAR.h"
 
 class ProstyUAR;
 
@@ -24,6 +24,7 @@ public:
     void setTd(double td);
     double getTd() const;
     void zresetuj();
+    void zresetujCalke();
 
     double pobierzOstatnieP() const { return ostatnie_P; }
     double pobierzOstatnieI() const { return ostatnie_I; }

@@ -1,24 +1,42 @@
 #ifndef PROSTYUAR_H
 #define PROSTYUAR_H
 
+#include <QObject>
+#include <QTimer>
 #include "ModelARX.h"
+#include "RegulatorPID.h"
+#include "Generator.h"
 
-class RegulatorPID;
-
-class ProstyUAR
+class ProstyUAR : public QObject
 {
-public:
-    ProstyUAR(ModelARX &arx, RegulatorPID &pid);
+    Q_OBJECT
 
-    // Główna funkcja symulacji pętli zamkniętej
-    // w - wartość zadana
-    // Zwraca y - wyjście z obiektu
-    double symuluj(double w);
+public:
+    explicit ProstyUAR(ModelARX &arx, RegulatorPID &pid, Generator &gen, QObject *parent = nullptr);
+
+    void start();
+    void stop();
+    void reset();
+    void setInterwal(int ms);
+    int getInterwal() const { return m_interwalMs; }
+
+    double symuluj(double wartosc_zadana, double dt = 1.0);
+
+signals:
+    void krokWykonany(double t, double w, double y, double e, double u);
+
+private slots:
+    void onTimeout();
 
 private:
     ModelARX &model;
     RegulatorPID &regulator;
-    double poprzednie_y; // Do obliczenia uchybu e = w - y(k-1)
+    Generator &generator;
+
+    QTimer *m_timer;
+    int m_interwalMs = 100;
+    double m_aktualnyCzas = 0.0;
+    double m_ostatnieWyjscie = 0.0;
 };
 
 #endif // PROSTYUAR_H

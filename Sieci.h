@@ -13,15 +13,12 @@ class Sieci : public QObject
 {
         Q_OBJECT
     public:
-        // NAPRAWIONE (UCHYBIENIE #2): dodano stan Nieokreslony, aby m_tryb miał
-        // sensowną wartość początkową. Wcześniej m_tryb był niezainicjowany,
-        // a set_tryb() porównywał go z nową wartością (niezdefiniowane zachowanie).
+
         enum Tryb { Nieokreslony, Regulator, Obiekt };
 
-        // Typy pakietów w protokole sieciowym (nagłówek = 1B typ + 4B rozmiar)
         enum TypPakietu : quint8 {
-                PAKIET_KONFIG = 1,  // JSON - pełna konfiguracja UAR
-                PAKIET_PROBKA = 2   // binarne dane symulacji (kolejny etap)
+                PAKIET_KONFIG = 1,
+                PAKIET_PROBKA = 2
         };
 
     public:
@@ -58,10 +55,6 @@ class Sieci : public QObject
 
         QTcpServer m_server;
         QTcpSocket *m_socket = nullptr;
-
-        // NAPRAWIONE (UCHYBIENIE #1): bufor jako pole klasy, a nie lokalna
-        // zmienna w onReadyRead. TCP może dostarczać dane we fragmentach,
-        // więc niepełny pakiet musi poczekać na kolejne wywołanie readyRead.
         QByteArray m_bufor;
 
         void podlaczSocket();

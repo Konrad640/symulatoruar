@@ -24,8 +24,6 @@ bool Sieci::czyPolaczony() const
 
 void Sieci::set_tryb(Tryb tryb)
 {
-        // Zawsze zaczynamy od czystego stanu - unika przecieków
-        // przy ponownym kliknięciu tego samego trybu.
         czyscPolaczenie();
         m_tryb = tryb;
 
@@ -65,7 +63,6 @@ void Sieci::onNewConnection()
         if (!nowy)
                 return;
 
-        // Tylko jedno połączenie na raz - odrzucamy dodatkowych klientów.
         if (m_socket) {
                 nowy->disconnectFromHost();
                 nowy->deleteLater();
@@ -152,8 +149,7 @@ void Sieci::wyslijPakiet(TypPakietu typ, const QByteArray &payload)
 
         QByteArray naglowek;
         QDataStream out(&naglowek, QIODevice::WriteOnly);
-        // NAPRAWIONE: jawnie ustawiona wersja QDataStream - gwarantuje zgodność
-        // formatu między instancjami niezależnie od wersji Qt.
+
         out.setVersion(QDataStream::Qt_5_15);
         out << static_cast<quint8>(typ);
         out << static_cast<quint32>(payload.size());
@@ -185,7 +181,6 @@ void Sieci::parsujBufor()
                 in >> typ >> rozmiar;
 
                 if (m_bufor.size() < ROZMIAR_NAGLOWKA + (int) rozmiar) {
-                        // Niepełny pakiet - czekamy na kolejne readyRead
                         return;
                 }
 
@@ -199,6 +194,5 @@ void Sieci::parsujBufor()
                                 emit odebranoKonfiguracje(doc.object());
                         }
                 }
-                // PAKIET_PROBKA - obsługa w kolejnym etapie (symulacja sieciowa)
         }
 }

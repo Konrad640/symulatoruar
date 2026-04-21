@@ -3,19 +3,17 @@
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
-#include <QElapsedTimer>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPushButton>
 #include <QSpinBox>
-#include <QTimer>
 #include <QtCharts>
 
 #include "Generator.h"
 #include "ModelARX.h"
-#include "Petla_Sprzezenia.h"
+#include "ProstyUAR.h"
 #include "RegulatorPID.h"
 #include "Sieci.h"
 
@@ -29,14 +27,14 @@ public:
     Sieci sieci;
 
 private slots:
-    void krokSymulacji();
+    void onKrokWykonany(double czas, double w, double y, double e, double u);
+
     void przelaczSymulacje();
     void zresetujSymulacje();
     void otworzKonfiguracjeARX();
 
     void aktualizujPID();
     void aktualizujGenerator();
-
     void aktualizujInterwal();
     void aktualizujOknoCzasowe();
 
@@ -57,20 +55,10 @@ private:
     ModelARX arx;
     RegulatorPID pid;
     Generator gen;
-    Petla_Sprzezenia petla;
+    ProstyUAR petla;
 
-    QTimer *timerSymulacji;
-
-    QElapsedTimer licznikCzasuRzeczywistego;
-    double czasBazy;
-    double aktualnyCzas;
-
-    bool czyDziala;
-    int interwalMs;
     double oknoCzasowe;
-
-    // Flaga zapobiegająca pętli echo przy aplikowaniu zdalnej konfiguracji
-    bool m_aplikujeZdalna;
+    bool   m_aplikujeZdalna;
 
     // GUI - Kontrolki
     QLineEdit *edycjaKp, *edycjaTi, *edycjaTd;
@@ -98,25 +86,23 @@ private:
     QLineEdit *edycjaIp;
     QSpinBox *spinPort;
     QLabel *lblStatusSieci;
-    QLabel *lblWskaznikPolaczenia; // kolorowa "dioda" pokazująca stan
+    QLabel *lblWskaznikPolaczenia;
 
     QGroupBox *grpPid;
     QGroupBox *grpGen;
     QGroupBox *grpSym;
 
-    // Wykresy i serie danych
+    // Wykresy
     QLineSeries *seriaZadana, *seriaWyjscie, *seriaUchyb, *seriaSterowanie;
     QLineSeries *seriaP, *seriaI, *seriaD;
     QChart *wykresGlowny, *wykresUchyb, *wykresSterowanie, *wykresPID;
     QValueAxis *osXGlowny, *osYGlowny, *osXUchyb, *osYUchyb;
     QValueAxis *osXSterowanie, *osYSterowanie, *osXPID, *osYPID;
 
-    // Metody pomocnicze
     void konfigurujGUI();
     void konfigurujWykresy();
     void aktualizujDaneWykresow(double t, double w, double y, double e, double u);
 
-    // Synchronizacja konfiguracji przez sieć
     QJsonObject zbudujKonfiguracjeJson() const;
     void zastosujKonfiguracjeJson(const QJsonObject &konfig);
     void wyslijKonfiguracjeJesliPolaczony();
