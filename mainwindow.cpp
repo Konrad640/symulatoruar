@@ -28,27 +28,35 @@ MainWindow::MainWindow(QWidget *parent)
     , petla(arx, pid)
     , czasBazy(0.0)
     , aktualnyCzas(0.0)
-    , // Inicjalizacja czasu bazy
-    czyDziala(false)
+    , czyDziala(false)
     , interwalMs(200)
     , oknoCzasowe(10.0)
+    , m_aplikujeZdalna(false)
 {
     konfigurujGUI();
     konfigurujWykresy();
 
     // Timer symulacji
     timerSymulacji = new QTimer(this);
-
     timerSymulacji->setTimerType(Qt::PreciseTimer);
     connect(timerSymulacji, &QTimer::timeout, this, &MainWindow::krokSymulacji);
 
     aktualizujGenerator();
-
-    // Inicjalizacja zmiennych na podstawie wartości domyślnych kontrolek
     aktualizujOknoCzasowe();
     aktualizujInterwal();
 
-    sieci.start();
+    // Konfiguracja i podpięcie sygnałów warstwy sieciowej
+    sieci.ustawParametry();
+    connect(&sieci, &Sieci::polaczono, this, &MainWindow::onSieciPolaczono);
+    connect(&sieci, &Sieci::rozlaczono, this, &MainWindow::onSieciRozlaczono);
+    connect(&sieci, &Sieci::statusZmieniony, this, &MainWindow::onSieciStatusZmieniony);
+    connect(&sieci,
+            &Sieci::odebranoKonfiguracje,
+            this,
+            &MainWindow::onSieciOdebranoKonfiguracje);
+
+    aktualizujStanKontrolek();
+    ustawWskaznikPolaczenia(false);
 }
 
 void MainWindow::konfigurujGUI()
@@ -65,7 +73,7 @@ void MainWindow::konfigurujGUI()
     QVBoxLayout *panelSterowania = new QVBoxLayout(lewyPanelContainer);
 
     // Grupa: Sterowanie Symulacją
-    QGroupBox *grpSym = new QGroupBox("Symulacja");
+    grpSym = new QGroupBox("Symulacja");
     QFormLayout *layoutSym = new QFormLayout();
 
     spinOknoCzasowe = new QDoubleSpinBox();
@@ -87,10 +95,10 @@ void MainWindow::konfigurujGUI()
     btnStartStop = new QPushButton("Start");
     connect(btnStartStop, &QPushButton::clicked, this, &MainWindow::przelaczSymulacje);
 
-    QPushButton *btnReset = new QPushButton("Pełny Reset");
+    btnReset = new QPushButton("Pełny Reset");
     connect(btnReset, &QPushButton::clicked, this, &MainWindow::zresetujSymulacje);
 
-    QPushButton *btnArx = new QPushButton("Konfiguracja Modelu ARX...");
+    btnArx = new QPushButton("Konfiguracja Modelu ARX...");
     connect(btnArx, &QPushButton::clicked, this, &MainWindow::otworzKonfiguracjeARX);
 
     layoutSym->addRow("Zakres Osi X:", spinOknoCzasowe);
@@ -101,7 +109,7 @@ void MainWindow::konfigurujGUI()
     panelSterowania->addWidget(grpSym);
 
     // Grupa: Regulator PID
-    QGroupBox *grpPid = new QGroupBox("Regulator PID");
+    grpPid = new QGroupBox("Regulator PID");
     QFormLayout *layoutPid = new QFormLayout();
 
     edycjaKp = new QLineEdit("0.5");
@@ -121,7 +129,7 @@ void MainWindow::konfigurujGUI()
             &MainWindow::aktualizujPID);
     comboMetodaCalk->setCurrentIndex(1);
 
-    QPushButton *btnResetI = new QPushButton("Reset Pamięci Całki");
+    btnResetI = new QPushButton("Reset Pamięci Całki");
     connect(btnResetI, &QPushButton::clicked, this, &MainWindow::zresetujCalkePID);
 
     layoutPid->addRow("Kp:", edycjaKp);
@@ -133,7 +141,7 @@ void MainWindow::konfigurujGUI()
     panelSterowania->addWidget(grpPid);
 
     // Grupa: Generator
-    QGroupBox *grpGen = new QGroupBox("Wartość Zadana");
+    grpGen = new QGroupBox("Wartość Zadana");
     QFormLayout *layoutGen = new QFormLayout();
 
     comboGenTyp = new QComboBox();
@@ -185,27 +193,62 @@ void MainWindow::konfigurujGUI()
     grpGen->setLayout(layoutGen);
     panelSterowania->addWidget(grpGen);
 
-    // Grupa: JSON
-    QPushButton *btnZapisz = new QPushButton("Zapisz Konfigurację (JSON)");
-    QPushButton *btnWczytaj = new QPushButton("Wczytaj Konfigurację (JSON)");
-    connect(btnZapisz, &QPushButton::clicked, this, &MainWindow::zapiszKonfiguracje);
-    connect(btnWczytaj, &QPushButton::clicked, this, &MainWindow::wczytajKonfiguracje);
+    // Grupa: JSON (zapis/wczyt do pliku)
+    btnZapiszJson = new QPushButton("Zapisz Konfigurację (JSON)");
+    btnWczytajJson = new QPushButton("Wczytaj Konfigurację (JSON)");
+    connect(btnZapiszJson, &QPushButton::clicked, this, &MainWindow::zapiszKonfiguracje);
+    connect(btnWczytajJson, &QPushButton::clicked, this, &MainWindow::wczytajKonfiguracje);
 
-    panelSterowania->addWidget(btnZapisz);
-    panelSterowania->addWidget(btnWczytaj);
+    panelSterowania->addWidget(btnZapiszJson);
+    panelSterowania->addWidget(btnWczytajJson);
 
     // Grupa: Sieci
     QGroupBox *grpSieci = new QGroupBox("Sieci");
-    QHBoxLayout *layoutTrybSieci = new QHBoxLayout();
-    QPushButton *btnTrybRegulator = new QPushButton("Tryb regulatora");
+    QVBoxLayout *layoutSieci = new QVBoxLayout();
 
-    QPushButton *btnTrybObiekt = new QPushButton("Tryb obiektu");
-    connect(btnTrybRegulator, &QPushButton::clicked, this, [&](){sieci.set_tryb(Sieci::Tryb::Regulator);});
-    connect(btnTrybObiekt, &QPushButton::clicked, this, [&](){sieci.set_tryb(Sieci::Tryb::Obiekt);});
+    // Pola IP i portu - regulator podaje na jakim porcie nasłuchuje,
+    // obiekt podaje adres i port regulatora do którego chce się podłączyć.
+    QFormLayout *layoutAdres = new QFormLayout();
+    edycjaIp = new QLineEdit("127.0.0.1");
+    edycjaIp->setPlaceholderText("IP regulatora (dla obiektu)");
+    spinPort = new QSpinBox();
+    spinPort->setRange(1024, 65535);
+    spinPort->setValue(45763);
+    layoutAdres->addRow("Adres IP:", edycjaIp);
+    layoutAdres->addRow("Port:", spinPort);
+    layoutSieci->addLayout(layoutAdres);
+
+    QHBoxLayout *layoutTrybSieci = new QHBoxLayout();
+    btnTrybRegulator = new QPushButton("Tryb regulatora");
+    btnTrybObiekt = new QPushButton("Tryb ");
+    btnRozlacz = new QPushButton("Rozłącz");
+    connect(btnTrybRegulator, &QPushButton::clicked, this, &MainWindow::wlaczTrybRegulator);
+    connect(btnTrybObiekt, &QPushButton::clicked, this, &MainWindow::wlaczTrybObiekt);
+    connect(btnRozlacz, &QPushButton::clicked, this, &MainWindow::rozlaczSiec);
 
     layoutTrybSieci->addWidget(btnTrybRegulator);
     layoutTrybSieci->addWidget(btnTrybObiekt);
-    grpSieci->setLayout(layoutTrybSieci);
+    layoutSieci->addLayout(layoutTrybSieci);
+    layoutSieci->addWidget(btnRozlacz);
+
+    // Wskaźnik połączenia - "dioda" + tekst statusu
+    QHBoxLayout *layoutStatus = new QHBoxLayout();
+    lblWskaznikPolaczenia = new QLabel();
+    lblWskaznikPolaczenia->setFixedSize(18, 18);
+    lblWskaznikPolaczenia->setStyleSheet(
+        "background-color: #b0b0b0; border-radius: 9px; border: 1px solid #555;");
+
+    lblStatusSieci = new QLabel("Rozłączony");
+    lblStatusSieci->setWordWrap(true);
+    QFont statusFont = lblStatusSieci->font();
+    statusFont.setBold(true);
+    lblStatusSieci->setFont(statusFont);
+
+    layoutStatus->addWidget(lblWskaznikPolaczenia);
+    layoutStatus->addWidget(lblStatusSieci, 1);
+    layoutSieci->addLayout(layoutStatus);
+
+    grpSieci->setLayout(layoutSieci);
     panelSterowania->addWidget(grpSieci);
 
     // KONCOWE DODANIE LEWEGO PANELU
@@ -327,8 +370,6 @@ void MainWindow::krokSymulacji()
 {
     double dt_gui = interwalMs / 1000.0;
 
-    //double dt_math = 1.0;
-
     double czasRzeczywistyTarget = czasBazy + (licznikCzasuRzeczywistego.elapsed() / 1000.0);
 
     double ost_w = 0.0;
@@ -342,9 +383,7 @@ void MainWindow::krokSymulacji()
         aktualnyCzas += dt_gui;
 
         ost_w = gen.generuj(aktualnyCzas);
-
-        ost_y = petla.wykonaj_krok(ost_w, dt_gui); // zamiast dt_gui bylo dt_math
-
+        ost_y = petla.wykonaj_krok(ost_w, dt_gui);
         ost_e = ost_w - ost_y;
 
         wykonaneKroki++;
@@ -364,7 +403,6 @@ void MainWindow::aktualizujDaneWykresow(double t, double w, double y, double e, 
 {
     int limitPunktow = 1000;
 
-    // Dodawanie punktów
     seriaZadana->append(t, w);
     seriaWyjscie->append(t, y);
     seriaUchyb->append(t, e);
@@ -373,7 +411,6 @@ void MainWindow::aktualizujDaneWykresow(double t, double w, double y, double e, 
     seriaI->append(t, pid.pobierzOstatnieI());
     seriaD->append(t, pid.pobierzOstatnieD());
 
-    // Przesuwanie osi X
     auto przesunOs = [&](QValueAxis *ax) {
         if (t > this->oknoCzasowe) {
             ax->setRange(t - this->oknoCzasowe, t);
@@ -388,7 +425,6 @@ void MainWindow::aktualizujDaneWykresow(double t, double w, double y, double e, 
     przesunOs(osXSterowanie);
     przesunOs(osXPID);
 
-    // Czyszczenie starych punktów
     if (seriaZadana->count() > limitPunktow) {
         seriaZadana->remove(0);
         seriaWyjscie->remove(0);
@@ -399,7 +435,6 @@ void MainWindow::aktualizujDaneWykresow(double t, double w, double y, double e, 
         seriaD->remove(0);
     }
 
-    // Auto-skalowanie Y (tylko dla danych widocznych w oknie)
     double minCzasWidoczny = (t > this->oknoCzasowe) ? t - this->oknoCzasowe : 0.0;
 
     auto autoScale = [&](const QList<QLineSeries *> &serie, QValueAxis *ay) {
@@ -468,8 +503,6 @@ void MainWindow::zresetujSymulacje()
     arx.zresetuj_stan();
     pid.zresetuj();
 
-    //seriaZadana = nullptr; 1 błąd
-
     seriaZadana->clear();
     seriaWyjscie->clear();
     seriaUchyb->clear();
@@ -495,6 +528,10 @@ void MainWindow::otworzKonfiguracjeARX()
 {
     KonfiguracjaARX *okno = new KonfiguracjaARX(&arx, this);
     okno->setAttribute(Qt::WA_DeleteOnClose);
+    // Po zamknięciu okna propagujemy nową konfigurację ARX do drugiej instancji
+    connect(okno, &QDialog::finished, this, [this](int) {
+        wyslijKonfiguracjeJesliPolaczony();
+    });
     okno->show();
 }
 
@@ -508,6 +545,8 @@ void MainWindow::aktualizujPID()
         pid.setMetodaCalkowania(RegulatorPID::MetodaCalkowania::STALA_W_SUMIE);
     else
         pid.setMetodaCalkowania(RegulatorPID::MetodaCalkowania::STALA_PRZED_SUMA);
+
+    wyslijKonfiguracjeJesliPolaczony();
 }
 
 void MainWindow::aktualizujGenerator()
@@ -530,6 +569,8 @@ void MainWindow::aktualizujGenerator()
                        spinGenOkres->value(),
                        spinGenWypelnienie->value(),
                        spinGenCzasAkt->value());
+
+    wyslijKonfiguracjeJesliPolaczony();
 }
 
 void MainWindow::aktualizujOknoCzasowe()
@@ -543,9 +584,9 @@ void MainWindow::aktualizujInterwal()
 
     if (czyDziala) {
         timerSymulacji->setInterval(interwalMs);
-
-       // aktualnyCzas = 0.0;
     }
+
+    wyslijKonfiguracjeJesliPolaczony();
 }
 
 void MainWindow::zresetujCalkePID()
@@ -553,11 +594,12 @@ void MainWindow::zresetujCalkePID()
     pid.zresetuj();
 }
 
-void MainWindow::zapiszKonfiguracje()
+// ---- Serializacja / deserializacja całej konfiguracji UAR ----
+
+QJsonObject MainWindow::zbudujKonfiguracjeJson() const
 {
     QJsonObject root;
 
-    // ARX
     QJsonObject jArx;
     QJsonArray arrA, arrB;
     for (double v : arx.getA())
@@ -570,7 +612,6 @@ void MainWindow::zapiszKonfiguracje()
     jArx["szum"] = arx.getSzum();
     root["ARX"] = jArx;
 
-    // PID
     QJsonObject jPid;
     jPid["Kp"] = pid.getKp();
     jPid["Ti"] = pid.getTi();
@@ -578,7 +619,6 @@ void MainWindow::zapiszKonfiguracje()
     jPid["Metoda"] = (int) pid.getMetodaCalkowania();
     root["PID"] = jPid;
 
-    // Generator
     QJsonObject jGen;
     jGen["Typ"] = (int) gen.getTyp();
     jGen["Pocz"] = gen.getPoczatkowa();
@@ -591,38 +631,13 @@ void MainWindow::zapiszKonfiguracje()
     root["Interwal"] = interwalMs;
     root["OknoCzasowe"] = oknoCzasowe;
 
-    QString sciezka = QFileDialog::getSaveFileName(this, "Zapisz Konfigurację", "", "JSON (*.json)");
-    if (sciezka.isEmpty())
-        return;
-
-    QFile plik(sciezka);
-    if (plik.open(QIODevice::WriteOnly)) {
-        QJsonDocument doc(root);
-        plik.write(doc.toJson());
-        plik.close();
-    } else {
-        QMessageBox::critical(this, "Błąd", "Nie można zapisać pliku!");
-    }
+    return root;
 }
 
-void MainWindow::wczytajKonfiguracje()
+void MainWindow::zastosujKonfiguracjeJson(const QJsonObject &root)
 {
-    QString sciezka = QFileDialog::getOpenFileName(this,
-                                                   "Wczytaj Konfigurację",
-                                                   "",
-                                                   "JSON (*.json)");
-    if (sciezka.isEmpty())
-        return;
-
-    QFile plik(sciezka);
-    if (!plik.open(QIODevice::ReadOnly)) {
-        QMessageBox::critical(this, "Błąd", "Nie można otworzyć pliku!");
-        return;
-    }
-
-    QJsonDocument doc = QJsonDocument::fromJson(plik.readAll());
-    QJsonObject root = doc.object();
-    plik.close();
+    // Flaga blokuje zwrotne wysłanie do partnera, unikamy pętli echo.
+    m_aplikujeZdalna = true;
 
     if (root.contains("ARX")) {
         QJsonObject jArx = root["ARX"].toObject();
@@ -675,5 +690,168 @@ void MainWindow::wczytajKonfiguracje()
         aktualizujOknoCzasowe();
     }
 
+    m_aplikujeZdalna = false;
+}
+
+void MainWindow::wyslijKonfiguracjeJesliPolaczony()
+{
+    if (m_aplikujeZdalna)
+        return; // nie odbijamy echa tego, co właśnie odebraliśmy
+    if (!sieci.czyPolaczony())
+        return;
+    sieci.wyslijKonfiguracje(zbudujKonfiguracjeJson());
+}
+
+void MainWindow::zapiszKonfiguracje()
+{
+    QString sciezka = QFileDialog::getSaveFileName(this, "Zapisz Konfigurację", "", "JSON (*.json)");
+    if (sciezka.isEmpty())
+        return;
+
+    QFile plik(sciezka);
+    if (plik.open(QIODevice::WriteOnly)) {
+        QJsonDocument doc(zbudujKonfiguracjeJson());
+        plik.write(doc.toJson());
+        plik.close();
+    } else {
+        QMessageBox::critical(this, "Błąd", "Nie można zapisać pliku!");
+    }
+}
+
+void MainWindow::wczytajKonfiguracje()
+{
+    QString sciezka = QFileDialog::getOpenFileName(this,
+                                                   "Wczytaj Konfigurację",
+                                                   "",
+                                                   "JSON (*.json)");
+    if (sciezka.isEmpty())
+        return;
+
+    QFile plik(sciezka);
+    if (!plik.open(QIODevice::ReadOnly)) {
+        QMessageBox::critical(this, "Błąd", "Nie można otworzyć pliku!");
+        return;
+    }
+
+    QJsonDocument doc = QJsonDocument::fromJson(plik.readAll());
+    plik.close();
+
+    zastosujKonfiguracjeJson(doc.object());
+
+    // Po wczytaniu z pliku propagujemy konfigurację do partnera (jeśli jest).
+    wyslijKonfiguracjeJesliPolaczony();
+
     QMessageBox::information(this, "Sukces", "Konfiguracja wczytana.");
+}
+
+// ---- Sloty sieciowe ----
+
+void MainWindow::wlaczTrybRegulator()
+{
+    // Regulator nasłuchuje na podanym porcie (adres IP nie jest używany - server
+    // słucha na QHostAddress::Any). Pola IP i portu blokujemy po wybraniu trybu.
+    sieci.ustawParametry(static_cast<quint16>(spinPort->value()), edycjaIp->text());
+    sieci.set_tryb(Sieci::Tryb::Regulator);
+    aktualizujStanKontrolek();
+}
+
+void MainWindow::wlaczTrybObiekt()
+{
+    // Obiekt łączy się z regulatorem pod podanym IP i portem.
+    sieci.ustawParametry(static_cast<quint16>(spinPort->value()), edycjaIp->text());
+    sieci.set_tryb(Sieci::Tryb::Obiekt);
+    aktualizujStanKontrolek();
+}
+
+void MainWindow::rozlaczSiec()
+{
+    sieci.rozlacz();
+    aktualizujStanKontrolek();
+}
+
+void MainWindow::onSieciPolaczono()
+{
+    ustawWskaznikPolaczenia(true);
+    aktualizujStanKontrolek();
+
+    // Po nawiązaniu połączenia strona REGULATORA wysyła swój zrzut konfiguracji
+    // jako "wzorzec startowy" - protokół zakłada automatyczną synchronizację.
+    if (sieci.get_tryb() == Sieci::Tryb::Regulator) {
+        sieci.wyslijKonfiguracje(zbudujKonfiguracjeJson());
+    }
+}
+
+void MainWindow::onSieciRozlaczono()
+{
+    ustawWskaznikPolaczenia(false);
+    aktualizujStanKontrolek();
+}
+
+void MainWindow::onSieciStatusZmieniony(const QString &opis)
+{
+    lblStatusSieci->setText(opis);
+}
+
+void MainWindow::onSieciOdebranoKonfiguracje(const QJsonObject &konfig)
+{
+    zastosujKonfiguracjeJson(konfig);
+}
+
+// ---- Pomocnicze: blokada kontrolek i wskaźnik "dioda" ----
+
+void MainWindow::aktualizujStanKontrolek()
+{
+    Sieci::Tryb tryb = sieci.get_tryb();
+    bool polaczony = sieci.czyPolaczony();
+
+    bool trybWybrany = (tryb != Sieci::Tryb::Nieokreslony);
+
+    // Przyciski wyboru trybu - aktywne tylko, gdy tryb nie jest jeszcze wybrany.
+    btnTrybRegulator->setEnabled(!trybWybrany);
+    btnTrybObiekt->setEnabled(!trybWybrany);
+    btnRozlacz->setEnabled(trybWybrany);
+
+    // Pola IP i portu można edytować tylko PRZED wybraniem trybu - po wyborze
+    // parametry są już "zamrożone" przekazaniem do warstwy sieciowej.
+    edycjaIp->setEnabled(!trybWybrany);
+    spinPort->setEnabled(!trybWybrany);
+
+    // Blokowanie kontrolek wg roli:
+    //  - REGULATOR "włada" regulatorem PID, generatorem wartości zadanej oraz
+    //    sterowaniem symulacją (Start/Stop, interwał).
+    //  - OBIEKT "włada" konfiguracją modelu ARX.
+    //  - W trybie nieokreślonym wszystko włączone (praca lokalna).
+    const bool regulator = (tryb == Sieci::Tryb::Regulator);
+    const bool obiekt = (tryb == Sieci::Tryb::Obiekt);
+
+    // PID, generator, start - dostępne w trybie regulatora lub lokalnie
+    bool mozePID = !trybWybrany || regulator;
+    grpPid->setEnabled(mozePID);
+    grpGen->setEnabled(mozePID);
+
+    // Konfiguracja ARX - dostępna w trybie obiektu lub lokalnie
+    bool mozeARX = !trybWybrany || obiekt;
+    btnArx->setEnabled(mozeARX);
+
+    // Start/Stop - tylko regulator uruchamia symulację (lub praca lokalna).
+    // Dodatkowo wymaga połączenia, gdy wybrano tryb sieciowy.
+    btnStartStop->setEnabled(mozePID && (!trybWybrany || polaczony));
+    btnReset->setEnabled(mozePID);
+    spinInterwal->setEnabled(mozePID);
+
+    // Wczytaj z pliku - tylko strona "władająca" całością (czyli regulator, lub lokalnie).
+    btnWczytajJson->setEnabled(mozePID);
+}
+
+void MainWindow::ustawWskaznikPolaczenia(bool polaczony)
+{
+    if (polaczony) {
+        lblWskaznikPolaczenia->setStyleSheet(
+            "background-color: #2ecc40; border-radius: 9px; border: 1px solid #186a1f;");
+        lblWskaznikPolaczenia->setToolTip("Połączono");
+    } else {
+        lblWskaznikPolaczenia->setStyleSheet(
+            "background-color: #b0b0b0; border-radius: 9px; border: 1px solid #555;");
+        lblWskaznikPolaczenia->setToolTip("Rozłączono");
+    }
 }

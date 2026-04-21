@@ -4,6 +4,8 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
+#include <QJsonObject>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPushButton>
@@ -42,6 +44,15 @@ private slots:
     void zapiszKonfiguracje();
     void wczytajKonfiguracje();
 
+    // Sloty sieciowe
+    void wlaczTrybRegulator();
+    void wlaczTrybObiekt();
+    void rozlaczSiec();
+    void onSieciPolaczono();
+    void onSieciRozlaczono();
+    void onSieciStatusZmieniony(const QString &opis);
+    void onSieciOdebranoKonfiguracje(const QJsonObject &konfig);
+
 private:
     ModelARX arx;
     RegulatorPID pid;
@@ -58,6 +69,9 @@ private:
     int interwalMs;
     double oknoCzasowe;
 
+    // Flaga zapobiegająca pętli echo przy aplikowaniu zdalnej konfiguracji
+    bool m_aplikujeZdalna;
+
     // GUI - Kontrolki
     QLineEdit *edycjaKp, *edycjaTi, *edycjaTd;
     QComboBox *comboMetodaCalk;
@@ -71,6 +85,24 @@ private:
     QDoubleSpinBox *spinOknoCzasowe;
 
     QPushButton *btnStartStop;
+    QPushButton *btnReset;
+    QPushButton *btnArx;
+    QPushButton *btnResetI;
+    QPushButton *btnZapiszJson;
+    QPushButton *btnWczytajJson;
+
+    // GUI - Sieci
+    QPushButton *btnTrybRegulator;
+    QPushButton *btnTrybObiekt;
+    QPushButton *btnRozlacz;
+    QLineEdit *edycjaIp;
+    QSpinBox *spinPort;
+    QLabel *lblStatusSieci;
+    QLabel *lblWskaznikPolaczenia; // kolorowa "dioda" pokazująca stan
+
+    QGroupBox *grpPid;
+    QGroupBox *grpGen;
+    QGroupBox *grpSym;
 
     // Wykresy i serie danych
     QLineSeries *seriaZadana, *seriaWyjscie, *seriaUchyb, *seriaSterowanie;
@@ -83,6 +115,13 @@ private:
     void konfigurujGUI();
     void konfigurujWykresy();
     void aktualizujDaneWykresow(double t, double w, double y, double e, double u);
+
+    // Synchronizacja konfiguracji przez sieć
+    QJsonObject zbudujKonfiguracjeJson() const;
+    void zastosujKonfiguracjeJson(const QJsonObject &konfig);
+    void wyslijKonfiguracjeJesliPolaczony();
+    void aktualizujStanKontrolek();
+    void ustawWskaznikPolaczenia(bool polaczony);
 };
 
 #endif // MAINWINDOW_H
