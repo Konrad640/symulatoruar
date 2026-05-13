@@ -48,8 +48,18 @@ private slots:
     void rozlaczSiec();
     void onSieciPolaczono();
     void onSieciRozlaczono();
+    void onSieciUtraconoPolaczenie();
     void onSieciStatusZmieniony(const QString &opis);
     void onSieciOdebranoKonfiguracje(const QJsonObject &konfig);
+    void onSieciOdebranoProbke(const ProbkaDanych &probka);
+    void onSieciOdebranoTaktStart();
+    void onSieciOdebranoTaktStop();
+    void onSieciOdebranoTaktInterwal(int interwalMs);
+
+    // Sterowanie timerem obiektu (tylko w trybie dwustronnym)
+    void startObiekt();
+    void stopObiekt();
+    void ustawInterwalObiekt();
 
 private:
     ModelARX arx;
@@ -83,6 +93,11 @@ private:
     QPushButton *btnTrybRegulator;
     QPushButton *btnTrybObiekt;
     QPushButton *btnRozlacz;
+    QCheckBox *chkJednostronny;
+    QGroupBox *grpSterowanieObiektu;
+    QPushButton *btnStartObiekt;
+    QPushButton *btnStopObiekt;
+    QSpinBox *spinInterwalObiekt;
     QLineEdit *edycjaIp;
     QSpinBox *spinPort;
     QLabel *lblStatusSieci;
@@ -107,7 +122,7 @@ private:
     void zastosujKonfiguracjeJson(const QJsonObject &konfig);
     void wyslijKonfiguracjeJesliPolaczony();
     void aktualizujStanKontrolek();
-    void ustawWskaznikPolaczenia(bool polaczony);
+    void ustawWskaznikPolaczenia(bool polaczony, bool ostrzezenie = false);
 };
 
 #endif // MAINWINDOW_H

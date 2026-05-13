@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "KonfiguracjaARX.h"
+#include "Sieci.h"
 
 #include <QDebug>
 #include <QFileDialog>
@@ -28,6 +29,33 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(&petla, &ProstyUAR::krokWykonany,
             this,   &MainWindow::onKrokWykonany);
+    connect(&petla, &ProstyUAR::krokWykonany,
+            this,   [this](double czas, double w, double y, double e, double u) {
+        // W trybie jednostronnym - wyślij próbkę do drugiej instancji
+        if (chkJednostronny->isChecked() && sieci.czyPolaczony()
+            && sieci.get_tryb() == Sieci::Tryb::Regulator) {
+            ProbkaDanych probka;
+            probka.numerSeq = sieci.nastepnyNumerSeq();
+            probka.czas = czas;
+            probka.wartoscZadana = w;
+            probka.wyjscie = y;
+            probka.uchyb = e;
+            probka.sterowanie = u;
+            sieci.wyslijProbkeTekstowo(probka);
+        }
+        // W trybie dwustronnym - wyślij próbkę do obiektu (tylko regulator)
+        else if (!chkJednostronny->isChecked() && sieci.czyPolaczony()
+                 && sieci.get_tryb() == Sieci::Tryb::Regulator) {
+            ProbkaDanych probka;
+            probka.numerSeq = sieci.nastepnyNumerSeq();
+            probka.czas = czas;
+            probka.wartoscZadana = w;
+            probka.wyjscie = y;
+            probka.uchyb = e;
+            probka.sterowanie = u;
+            sieci.wyslijProbkeTekstowo(probka);
+        }
+    });
 
     aktualizujGenerator();
     aktualizujOknoCzasowe();
@@ -36,9 +64,15 @@ MainWindow::MainWindow(QWidget *parent)
     sieci.ustawParametry();
     connect(&sieci, &Sieci::polaczono,          this, &MainWindow::onSieciPolaczono);
     connect(&sieci, &Sieci::rozlaczono,         this, &MainWindow::onSieciRozlaczono);
+    connect(&sieci, &Sieci::utraconoPolaczenie, this, &MainWindow::onSieciUtraconoPolaczenie);
     connect(&sieci, &Sieci::statusZmieniony,    this, &MainWindow::onSieciStatusZmieniony);
     connect(&sieci, &Sieci::odebranoKonfiguracje, this, &MainWindow::onSieciOdebranoKonfiguracje);
-
+    connect(&sieci, &Sieci::odebranoProbkeTekstowa, this, &MainWindow::onSieciOdebranoProbke);
+    connect(&sieci, &Sieci::odebranoProbkeBinarna, this, &MainWindow::onSieciOdebranoProbke);
+    connect(&sieci, &Sieci::odebranoTaktStart, this, &MainWindow::onSieciOdebranoTaktStart);
+    connect(&sieci, &Sieci::odebranoTaktStop, this, &MainWindow::onSieciOdebranoTaktStop);
+    connect(&sieci, &Sieci::odebranoTaktInterwal, this, &MainWindow::onSieciOdebranoTaktInterwal);
+    
     aktualizujStanKontrolek();
     ustawWskaznikPolaczenia(false);
 }
@@ -52,7 +86,18 @@ void MainWindow::onKrokWykonany(double czas, double w, double y, double e, doubl
 
 void MainWindow::przelaczSymulacje()
 {
-    if (petla.getInterwal() > 0 && btnStartStop->text() == "Stop") {
+    bool terazAktywny = (btnStartStop->text() == "Stop");
+
+    // W trybie dwustronnym - wyślij komendę do obiektu
+    if (sieci.czyPolaczony() && !chkJednostronny->isChecked() && sieci.get_tryb() == Sieci::Tryb::Regulator) {
+        if (terazAktywny) {
+            sieci.wyslijTaktStop();
+        } else {
+            sieci.wyslijTaktStart();
+        }
+    }
+
+    if (terazAktywny) {
         petla.stop();
         btnStartStop->setText("Start");
     } else {
@@ -94,6 +139,12 @@ void MainWindow::zresetujSymulacje()
 void MainWindow::aktualizujInterwal()
 {
     petla.setInterwal(spinInterwal->value());
+
+    // W trybie dwustronnym - wyślij interwał do obiektu
+    if (sieci.czyPolaczony() && !chkJednostronny->isChecked() && sieci.get_tryb() == Sieci::Tryb::Regulator) {
+        sieci.wyslijTaktInterwal(spinInterwal->value());
+    }
+
     wyslijKonfiguracjeJesliPolaczony();
 }
 
@@ -268,6 +319,44 @@ void MainWindow::konfigurujGUI()
     layoutAdres->addRow("Adres IP:", edycjaIp);
     layoutAdres->addRow("Port:", spinPort);
     layoutSieci->addLayout(layoutAdres);
+
+    chkJednostronny = new QCheckBox("Taktowanie jednostronne");
+    chkJednostronny->setChecked(true);  // Domyślnie włączony
+    layoutSieci->addWidget(chkJednostronny);
+
+    // Sekcja sterowania timerem obiektu (tylko tryb dwustronny)
+    grpSterowanieObiektu = new QGroupBox("Sterowanie obiektem (tylko dwustronny)");
+    QVBoxLayout *layoutSterObiektu = new QVBoxLayout();
+
+    QHBoxLayout *layoutStartStop = new QHBoxLayout();
+    btnStartObiekt = new QPushButton("Start");
+    btnStopObiekt = new QPushButton("Stop");
+    btnStartObiekt->setMaximumWidth(70);
+    btnStopObiekt->setMaximumWidth(70);
+    connect(btnStartObiekt, &QPushButton::clicked, this, &MainWindow::startObiekt);
+    connect(btnStopObiekt, &QPushButton::clicked, this, &MainWindow::stopObiekt);
+    layoutStartStop->addWidget(btnStartObiekt);
+    layoutStartStop->addWidget(btnStopObiekt);
+    layoutSterObiektu->addLayout(layoutStartStop);
+
+    QFormLayout *layoutInterwalObiekt = new QFormLayout();
+    spinInterwalObiekt = new QSpinBox();
+    spinInterwalObiekt->setRange(10, 1000);
+    spinInterwalObiekt->setValue(200);
+    spinInterwalObiekt->setSuffix(" ms");
+    layoutInterwalObiekt->addRow("Interwał:", spinInterwalObiekt);
+    layoutSterObiektu->addLayout(layoutInterwalObiekt);
+
+    connect(spinInterwalObiekt, &QSpinBox::editingFinished, this, &MainWindow::ustawInterwalObiekt);
+
+    grpSterowanieObiektu->setLayout(layoutSterObiektu);
+    layoutSieci->addWidget(grpSterowanieObiektu);
+
+    // Synchronizuj zmianę trybu z drugą instancją przez konfigurację
+    connect(chkJednostronny, &QCheckBox::toggled, this, [this](bool) {
+        aktualizujStanKontrolek();
+        wyslijKonfiguracjeJesliPolaczony();  // Konfiguracja poleci automatycznie
+    });
 
     QHBoxLayout *layoutTrybSieci = new QHBoxLayout();
     btnTrybRegulator = new QPushButton("Tryb regulatora");
@@ -453,6 +542,7 @@ QJsonObject MainWindow::zbudujKonfiguracjeJson() const
 
     root["Interwal"] = petla.getInterwal();
     root["OknoCzasowe"] = oknoCzasowe;
+    root["Jednostronny"] = chkJednostronny->isChecked();
 
     return root;
 }
@@ -512,6 +602,17 @@ void MainWindow::zastosujKonfiguracjeJson(const QJsonObject &root)
         aktualizujOknoCzasowe();
     }
 
+    // Synchronizacja trybu jednostronnego/dwustronnego
+    if (root.contains("Jednostronny")) {
+        bool jednostronny = root["Jednostronny"].toBool();
+        chkJednostronny->setChecked(jednostronny);
+
+        // W trybie dwustronnym obiekt uruchamia symulację
+        if (!jednostronny && sieci.get_tryb() == Sieci::Tryb::Obiekt) {
+            petla.start();
+        }
+    }
+
     m_aplikujeZdalna = false;
 }
 
@@ -569,6 +670,19 @@ void MainWindow::wlaczTrybRegulator()
 {
     sieci.ustawParametry(static_cast<quint16>(spinPort->value()), edycjaIp->text());
     sieci.set_tryb(Sieci::Tryb::Regulator);
+
+    // Zainicjuj interwał obiektu bieżącą wartością
+    spinInterwalObiekt->setValue(spinInterwal->value());
+
+    // Tryb jednostronny - tylko regulator wykonuje takty
+    if (chkJednostronny->isChecked()) {
+        sieci.setTrybJednostronny(true);
+        sieci.setTimeoutJednostronny(spinInterwal->value() * 3); // 3 interwały timeout
+    }
+    else {
+        sieci.setTrybJednostronny(false);
+    }
+
     aktualizujStanKontrolek();
 }
 
@@ -576,6 +690,15 @@ void MainWindow::wlaczTrybObiekt()
 {
     sieci.ustawParametry(static_cast<quint16>(spinPort->value()), edycjaIp->text());
     sieci.set_tryb(Sieci::Tryb::Obiekt);
+
+    // W trybie jednostronnym obiekt tylko odpowiada na dane
+    if (chkJednostronny->isChecked()) {
+        sieci.setTrybJednostronny(true);
+    }
+    else {
+        sieci.setTrybJednostronny(false);
+    }
+
     aktualizujStanKontrolek();
 }
 
@@ -601,6 +724,14 @@ void MainWindow::onSieciRozlaczono()
     aktualizujStanKontrolek();
 }
 
+void MainWindow::onSieciUtraconoPolaczenie()
+{
+    // Czerwone jeśli symulacja w toku, szare jeśli zatrzymana
+    bool symulacjaAktywna = petla.isRunning();
+    ustawWskaznikPolaczenia(false, symulacjaAktywna);
+    aktualizujStanKontrolek();
+}
+
 void MainWindow::onSieciStatusZmieniony(const QString &opis)
 {
     lblStatusSieci->setText(opis);
@@ -609,6 +740,82 @@ void MainWindow::onSieciStatusZmieniony(const QString &opis)
 void MainWindow::onSieciOdebranoKonfiguracje(const QJsonObject &konfig)
 {
     zastosujKonfiguracjeJson(konfig);
+}
+
+void MainWindow::onSieciOdebranoProbke(const ProbkaDanych &probka)
+{
+    // W trybie jednostronnym obiekt otrzymuje próbkę z regulatora
+    // i odsyła ją z powrotem (lub sam oblicza wyjście)
+    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && chkJednostronny->isChecked()) {
+        // Oblicz wyjście obiektu na podstawie uchybu/sterowania
+        double wyjscie = petla.obliczWyjscie(probka.sterowanie);
+
+        // Wyślij próbkę z powrotem do regulatora
+        ProbkaDanych odpowiedz;
+        odpowiedz.numerSeq = probka.numerSeq;
+        odpowiedz.czas = probka.czas;
+        odpowiedz.wartoscZadana = probka.wartoscZadana;
+        odpowiedz.wyjscie = wyjscie;
+        odpowiedz.uchyb = probka.uchyb;
+        odpowiedz.sterowanie = probka.sterowanie;
+
+        sieci.wyslijProbkeTekstowo(odpowiedz);
+    }
+    // W trybie dwustronnym po stronie regulatora - aktualizuj dane z odpowiedzi obiektu
+    else if (sieci.get_tryb() == Sieci::Tryb::Regulator && !chkJednostronny->isChecked()) {
+        // Zaktualizuj dane wykresów danymi z obiektu
+        aktualizujDaneWykresow(probka.czas, probka.wartoscZadana, probka.wyjscie, probka.uchyb, probka.sterowanie);
+    }
+}
+
+void MainWindow::onSieciOdebranoTaktStart()
+{
+    // Obiekt - uruchom taktowanie po otrzymaniu komendy od regulatora
+    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && !chkJednostronny->isChecked()) {
+        petla.start();
+    }
+}
+
+void MainWindow::onSieciOdebranoTaktStop()
+{
+    // Obiekt - zatrzymaj taktowanie po otrzymaniu komendy od regulatora
+    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && !chkJednostronny->isChecked()) {
+        petla.stop();
+    }
+}
+
+void MainWindow::onSieciOdebranoTaktInterwal(int interwalMs)
+{
+    // Obiekt - zmień interwał taktowania
+    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && !chkJednostronny->isChecked()) {
+        petla.setInterwal(interwalMs);
+        spinInterwal->setValue(interwalMs);  // synchronizuj z GUI
+    }
+    // Regulator - zaktualizuj pole interwału obiektu
+    else if (sieci.get_tryb() == Sieci::Tryb::Regulator && !chkJednostronny->isChecked()) {
+        spinInterwalObiekt->setValue(interwalMs);
+    }
+}
+
+void MainWindow::startObiekt()
+{
+    if (!chkJednostronny->isChecked() && sieci.czyPolaczony()) {
+        sieci.wyslijTaktStart();
+    }
+}
+
+void MainWindow::stopObiekt()
+{
+    if (!chkJednostronny->isChecked() && sieci.czyPolaczony()) {
+        sieci.wyslijTaktStop();
+    }
+}
+
+void MainWindow::ustawInterwalObiekt()
+{
+    if (!chkJednostronny->isChecked() && sieci.czyPolaczony()) {
+        sieci.wyslijTaktInterwal(spinInterwalObiekt->value());
+    }
 }
 
 
@@ -641,17 +848,26 @@ void MainWindow::aktualizujStanKontrolek()
     spinInterwal->setEnabled(mozePID);
 
     btnWczytajJson->setEnabled(mozePID);
+
+    // Sterowanie obiektem - tylko w trybie dwustronnym i regulatorze
+    bool mozeSterowacObiektem = regulator && !chkJednostronny->isChecked();
+    grpSterowanieObiektu->setEnabled(mozeSterowacObiektem);
 }
 
-void MainWindow::ustawWskaznikPolaczenia(bool polaczony)
+void MainWindow::ustawWskaznikPolaczenia(bool polaczony, bool ostrzezenie)
 {
-    if (polaczony) {
+    if (ostrzezenie) {
+        lblWskaznikPolaczenia->setStyleSheet(
+            "background-color: #ff4136; border-radius: 9px; border: 1px solid #a3140c;");
+        lblWskaznikPolaczenia->setToolTip("Ostrzezenie - symulacja nie wyrabia!");
+    }
+    else if (polaczony) {
         lblWskaznikPolaczenia->setStyleSheet(
             "background-color: #2ecc40; border-radius: 9px; border: 1px solid #186a1f;");
-        lblWskaznikPolaczenia->setToolTip("Połączono");
+        lblWskaznikPolaczenia->setToolTip("Polaczone");
     } else {
         lblWskaznikPolaczenia->setStyleSheet(
             "background-color: #b0b0b0; border-radius: 9px; border: 1px solid #555;");
-        lblWskaznikPolaczenia->setToolTip("Rozłączono");
+        lblWskaznikPolaczenia->setToolTip("Rozlaczone");
     }
 }

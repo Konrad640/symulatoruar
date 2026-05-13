@@ -49,6 +49,15 @@ double ProstyUAR::symuluj(double wartosc_zadana, double dt)
     return y;
 }
 
+double ProstyUAR::obliczWyjscie(double sterowanie)
+{
+    // Oblicza wyjście obiektu dla danego sterowania (bez regulatora)
+    // Używane w trybie jednostronnym, gdy obiekt otrzymuje sterowanie z zewnątrz
+    double y = model.symuluj(sterowanie);
+    m_ostatnieWyjscie = y;
+    return y;
+}
+
 void ProstyUAR::start()
 {
     m_timer->start(m_interwalMs);
