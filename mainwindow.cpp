@@ -1,6 +1,5 @@
 #include "MainWindow.h"
 #include "KonfiguracjaARX.h"
-#include "Sieci.h"
 
 #include <QDebug>
 #include <QFileDialog>
@@ -12,6 +11,8 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
+#include <QDateTime>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 #include <cmath>
 
@@ -23,58 +24,55 @@ MainWindow::MainWindow(QWidget *parent)
     , petla(arx, pid, gen, this)
     , oknoCzasowe(10.0)
     , m_aplikujeZdalna(false)
+    , m_timerSieciowy(new QTimer(this))
+    , m_czasSieciowy(0.0)
+    , m_ostatnieYSieciowe(0.0)
+    , m_ostatnieUSieciowe(0.0)
+    , m_ostatnieWSieciowe(0.0)
+    , m_ostatnieESieciowe(0.0)
+    , m_ostatniePSieciowe(0.0)
+    , m_ostatnieISieciowe(0.0)
+    , m_ostatnieDSieciowe(0.0)
+    , m_ostatnieDtSieciowe(0.0)
+    , m_shadowYSieciowe(0.0)
+    , m_shadowUSieciowe(0.0)
+    , m_numerProbkiSieciowej(0)
+    , m_ostatniSeqSterowania(0)
+    , m_ostatniSeqOdpowiedzi(0)
+    , m_brakiSterowaniaPodRzad(0)
+    , m_pakietyWyslaneOkno(0)
+    , m_pakietyOdebraneOkno(0)
+    , m_ostatniDesync(0)
+    , m_oczekujeNaOdpowiedz(false)
+    , m_maNoweSterowanie(false)
+    , m_rozlaczanieCelowe(false)
+    , m_byloPolaczenie(false)
+    , m_ostatniIndeksTaktowaniaSieci(0)
 {
     konfigurujGUI();
     konfigurujWykresy();
 
     connect(&petla, &ProstyUAR::krokWykonany,
             this,   &MainWindow::onKrokWykonany);
-    connect(&petla, &ProstyUAR::krokWykonany,
-            this,   [this](double czas, double w, double y, double e, double u) {
-        // W trybie jednostronnym - wyślij próbkę do drugiej instancji
-        if (chkJednostronny->isChecked() && sieci.czyPolaczony()
-            && sieci.get_tryb() == Sieci::Tryb::Regulator) {
-            ProbkaDanych probka;
-            probka.numerSeq = sieci.nastepnyNumerSeq();
-            probka.czas = czas;
-            probka.wartoscZadana = w;
-            probka.wyjscie = y;
-            probka.uchyb = e;
-            probka.sterowanie = u;
-            sieci.wyslijProbkeTekstowo(probka);
-        }
-        // W trybie dwustronnym - wyślij próbkę do obiektu (tylko regulator)
-        else if (!chkJednostronny->isChecked() && sieci.czyPolaczony()
-                 && sieci.get_tryb() == Sieci::Tryb::Regulator) {
-            ProbkaDanych probka;
-            probka.numerSeq = sieci.nastepnyNumerSeq();
-            probka.czas = czas;
-            probka.wartoscZadana = w;
-            probka.wyjscie = y;
-            probka.uchyb = e;
-            probka.sterowanie = u;
-            sieci.wyslijProbkeTekstowo(probka);
-        }
-    });
+    m_timerSieciowy->setTimerType(Qt::PreciseTimer);
+    connect(m_timerSieciowy, &QTimer::timeout, this, &MainWindow::onSieciowyTimeout);
 
     aktualizujGenerator();
     aktualizujOknoCzasowe();
     petla.setInterwal(spinInterwal->value());
+    m_timerSieciowy->setInterval(spinInterwal->value());
 
     sieci.ustawParametry();
     connect(&sieci, &Sieci::polaczono,          this, &MainWindow::onSieciPolaczono);
     connect(&sieci, &Sieci::rozlaczono,         this, &MainWindow::onSieciRozlaczono);
-    connect(&sieci, &Sieci::utraconoPolaczenie, this, &MainWindow::onSieciUtraconoPolaczenie);
     connect(&sieci, &Sieci::statusZmieniony,    this, &MainWindow::onSieciStatusZmieniony);
     connect(&sieci, &Sieci::odebranoKonfiguracje, this, &MainWindow::onSieciOdebranoKonfiguracje);
-    connect(&sieci, &Sieci::odebranoProbkeTekstowa, this, &MainWindow::onSieciOdebranoProbke);
-    connect(&sieci, &Sieci::odebranoProbkeBinarna, this, &MainWindow::onSieciOdebranoProbke);
-    connect(&sieci, &Sieci::odebranoTaktStart, this, &MainWindow::onSieciOdebranoTaktStart);
-    connect(&sieci, &Sieci::odebranoTaktStop, this, &MainWindow::onSieciOdebranoTaktStop);
-    connect(&sieci, &Sieci::odebranoTaktInterwal, this, &MainWindow::onSieciOdebranoTaktInterwal);
-    
+    connect(&sieci, &Sieci::odebranoProbke,     this, &MainWindow::onSieciOdebranoProbke);
+
     aktualizujStanKontrolek();
     ustawWskaznikPolaczenia(false);
+    ustawLampkeWydajnosci(true, "Brak aktywnej transmisji");
+    m_zegarWydajnosci.start();
 }
 
 
@@ -86,18 +84,19 @@ void MainWindow::onKrokWykonany(double czas, double w, double y, double e, doubl
 
 void MainWindow::przelaczSymulacje()
 {
-    bool terazAktywny = (btnStartStop->text() == "Stop");
-
-    // W trybie dwustronnym - wyślij komendę do obiektu
-    if (sieci.czyPolaczony() && !chkJednostronny->isChecked() && sieci.get_tryb() == Sieci::Tryb::Regulator) {
-        if (terazAktywny) {
-            sieci.wyslijTaktStop();
+    if (czyTrybSieciowy()) {
+        if (m_timerSieciowy->isActive()) {
+            if (sieci.get_tryb() == Sieci::Tryb::Regulator)
+                wyslijKomendeSieciowa("stop");
+            zatrzymajSymulacjeSieciowa();
         } else {
-            sieci.wyslijTaktStart();
+            uruchomSymulacjeSieciowa();
         }
+        aktualizujStanKontrolek();
+        return;
     }
 
-    if (terazAktywny) {
+    if (petla.getInterwal() > 0 && btnStartStop->text() == "Stop") {
         petla.stop();
         btnStartStop->setText("Start");
     } else {
@@ -109,7 +108,11 @@ void MainWindow::przelaczSymulacje()
 
 void MainWindow::zresetujSymulacje()
 {
+    const bool wyslacResetDoPartnera = czyTrybSieciowy() && sieci.czyPolaczony() && !m_aplikujeZdalna;
+
     petla.reset();
+    zatrzymajSymulacjeSieciowa();
+    zresetujStanSieciowy();
     btnStartStop->setText("Start");
 
     arx.zresetuj_stan();
@@ -134,17 +137,16 @@ void MainWindow::zresetujSymulacje()
 
     aktualizujGenerator();
     aktualizujStanKontrolek();
+
+    if (wyslacResetDoPartnera)
+        wyslijKomendeSieciowa("reset");
 }
 
 void MainWindow::aktualizujInterwal()
 {
     petla.setInterwal(spinInterwal->value());
-
-    // W trybie dwustronnym - wyślij interwał do obiektu
-    if (sieci.czyPolaczony() && !chkJednostronny->isChecked() && sieci.get_tryb() == Sieci::Tryb::Regulator) {
-        sieci.wyslijTaktInterwal(spinInterwal->value());
-    }
-
+    m_timerSieciowy->setInterval(spinInterwal->value());
+    m_ostatnieDtSieciowe = spinInterwal->value() / 1000.0;
     wyslijKonfiguracjeJesliPolaczony();
 }
 
@@ -316,47 +318,54 @@ void MainWindow::konfigurujGUI()
     QFormLayout *layoutAdres = new QFormLayout();
     edycjaIp = new QLineEdit("127.0.0.1");
     spinPort  = new QSpinBox(); spinPort->setRange(1024, 65535); spinPort->setValue(45763);
+    comboTaktowanieSieci = new QComboBox();
+    comboTaktowanieSieci->addItem("Taktowanie jednostronne", 0);
+    comboTaktowanieSieci->addItem("Taktowanie obustronne", 1);
+    connect(comboTaktowanieSieci, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        if (m_timerSieciowy->isActive()) {
+            QMessageBox::warning(this,
+                                 "Zmiana taktowania",
+                                 "Najpierw zatrzymaj symulacje, a dopiero potem zmien taktowanie.");
+            QSignalBlocker blokada(comboTaktowanieSieci);
+            comboTaktowanieSieci->setCurrentIndex(m_ostatniIndeksTaktowaniaSieci);
+            return;
+        }
+
+        if (czyTrybSieciowy() && sieci.czyPolaczony()) {
+            const auto decyzja = QMessageBox::question(
+                this,
+                "Zmiana taktowania",
+                "Zmiana taktowania zatrzyma i zresetuje stan sieciowy po obu stronach. Kontynuowac?");
+
+            if (decyzja != QMessageBox::Yes) {
+                QSignalBlocker blokada(comboTaktowanieSieci);
+                comboTaktowanieSieci->setCurrentIndex(m_ostatniIndeksTaktowaniaSieci);
+                return;
+            }
+        }
+
+        if (czyTrybSieciowy()) {
+            zatrzymajSymulacjeSieciowa();
+            zresetujStanSieciowy();
+            wyslijKomendeSieciowa("reset");
+        }
+        m_ostatniIndeksTaktowaniaSieci = comboTaktowanieSieci->currentIndex();
+        aktualizujStanKontrolek();
+        wyslijKonfiguracjeJesliPolaczony();
+    });
     layoutAdres->addRow("Adres IP:", edycjaIp);
     layoutAdres->addRow("Port:", spinPort);
-    layoutSieci->addLayout(layoutAdres);
+    layoutAdres->addRow("Taktowanie:", comboTaktowanieSieci);
 
-    chkJednostronny = new QCheckBox("Taktowanie jednostronne");
-    chkJednostronny->setChecked(true);  // Domyślnie włączony
-    layoutSieci->addWidget(chkJednostronny);
-
-    // Sekcja sterowania timerem obiektu (tylko tryb dwustronny)
-    grpSterowanieObiektu = new QGroupBox("Sterowanie obiektem (tylko dwustronny)");
-    QVBoxLayout *layoutSterObiektu = new QVBoxLayout();
-
-    QHBoxLayout *layoutStartStop = new QHBoxLayout();
-    btnStartObiekt = new QPushButton("Start");
-    btnStopObiekt = new QPushButton("Stop");
-    btnStartObiekt->setMaximumWidth(70);
-    btnStopObiekt->setMaximumWidth(70);
-    connect(btnStartObiekt, &QPushButton::clicked, this, &MainWindow::startObiekt);
-    connect(btnStopObiekt, &QPushButton::clicked, this, &MainWindow::stopObiekt);
-    layoutStartStop->addWidget(btnStartObiekt);
-    layoutStartStop->addWidget(btnStopObiekt);
-    layoutSterObiektu->addLayout(layoutStartStop);
-
-    QFormLayout *layoutInterwalObiekt = new QFormLayout();
-    spinInterwalObiekt = new QSpinBox();
-    spinInterwalObiekt->setRange(10, 1000);
-    spinInterwalObiekt->setValue(200);
-    spinInterwalObiekt->setSuffix(" ms");
-    layoutInterwalObiekt->addRow("Interwał:", spinInterwalObiekt);
-    layoutSterObiektu->addLayout(layoutInterwalObiekt);
-
-    connect(spinInterwalObiekt, &QSpinBox::editingFinished, this, &MainWindow::ustawInterwalObiekt);
-
-    grpSterowanieObiektu->setLayout(layoutSterObiektu);
-    layoutSieci->addWidget(grpSterowanieObiektu);
-
-    // Synchronizuj zmianę trybu z drugą instancją przez konfigurację
-    connect(chkJednostronny, &QCheckBox::toggled, this, [this](bool) {
-        aktualizujStanKontrolek();
-        wyslijKonfiguracjeJesliPolaczony();  // Konfiguracja poleci automatycznie
+    comboSerializacja = new QComboBox();
+    comboSerializacja->addItem("Binarna", 0);
+    comboSerializacja->addItem("Tekstowa (JSON)", 1);
+    connect(comboSerializacja, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+        sieci.setSerializacjaProbek(idx == 0 ? Sieci::SER_BINARNA : Sieci::SER_TEKSTOWA);
     });
+    layoutAdres->addRow("Serializacja:", comboSerializacja);
+
+    layoutSieci->addLayout(layoutAdres);
 
     QHBoxLayout *layoutTrybSieci = new QHBoxLayout();
     btnTrybRegulator = new QPushButton("Tryb regulatora");
@@ -380,6 +389,28 @@ void MainWindow::konfigurujGUI()
     layoutStatus->addWidget(lblWskaznikPolaczenia);
     layoutStatus->addWidget(lblStatusSieci, 1);
     layoutSieci->addLayout(layoutStatus);
+
+    lblPartnerSieci = new QLabel("Partner: brak");
+    lblSyncSieci = new QLabel("Sync: brak danych");
+    lblSterowanieSieci = new QLabel("Sterowanie: brak danych");
+    lblWydajnoscSieci = new QLabel("Pakiety/s: 0.0");
+    lblShadowSieci = new QLabel("Shadow: brak danych");
+    lblPartnerSieci->setWordWrap(true);
+    lblSyncSieci->setWordWrap(true);
+    lblSterowanieSieci->setWordWrap(true);
+    lblShadowSieci->setWordWrap(true);
+
+    QHBoxLayout *layoutWydajnosc = new QHBoxLayout();
+    lblLampkaWydajnosci = new QLabel();
+    lblLampkaWydajnosci->setFixedSize(18, 18);
+    layoutWydajnosc->addWidget(lblLampkaWydajnosci);
+    layoutWydajnosc->addWidget(lblWydajnoscSieci, 1);
+
+    layoutSieci->addWidget(lblPartnerSieci);
+    layoutSieci->addWidget(lblSyncSieci);
+    layoutSieci->addWidget(lblSterowanieSieci);
+    layoutSieci->addLayout(layoutWydajnosc);
+    layoutSieci->addWidget(lblShadowSieci);
     grpSieci->setLayout(layoutSieci);
     panelSterowania->addWidget(grpSieci);
 
@@ -461,13 +492,26 @@ void MainWindow::konfigurujWykresy()
 
 void MainWindow::aktualizujDaneWykresow(double t, double w, double y, double e, double u)
 {
+    aktualizujDaneWykresow(t,
+                           w,
+                           y,
+                           e,
+                           u,
+                           pid.pobierzOstatnieP(),
+                           pid.pobierzOstatnieI(),
+                           pid.pobierzOstatnieD());
+}
+
+void MainWindow::aktualizujDaneWykresow(
+    double t, double w, double y, double e, double u, double p, double i, double d)
+{
     seriaZadana->append(t, w);
     seriaWyjscie->append(t, y);
     seriaUchyb->append(t, e);
     seriaSterowanie->append(t, u);
-    seriaP->append(t, pid.pobierzOstatnieP());
-    seriaI->append(t, pid.pobierzOstatnieI());
-    seriaD->append(t, pid.pobierzOstatnieD());
+    seriaP->append(t, p);
+    seriaI->append(t, i);
+    seriaD->append(t, d);
 
     auto przesunOs = [&](QValueAxis *ax) {
         ax->setRange(t > oknoCzasowe ? t - oknoCzasowe : 0, t > oknoCzasowe ? t : oknoCzasowe);
@@ -486,8 +530,9 @@ void MainWindow::aktualizujDaneWykresow(double t, double w, double y, double e, 
     auto autoScale = [&](const QList<QLineSeries *> &serie, QValueAxis *ay) {
         double minV = 1e9, maxV = -1e9; bool znaleziono = false;
         for (auto s : serie) {
-            for (int i = s->points().size() - 1; i >= 0; --i) {
-                const QPointF &p = s->points()[i];
+            const QList<QPointF> punkty = s->points();
+            for (int i = punkty.size() - 1; i >= 0; --i) {
+                const QPointF &p = punkty[i];
                 if (p.x() < minCzasWidoczny) break;
                 if (p.y() < minV) minV = p.y();
                 if (p.y() > maxV) maxV = p.y();
@@ -542,7 +587,7 @@ QJsonObject MainWindow::zbudujKonfiguracjeJson() const
 
     root["Interwal"] = petla.getInterwal();
     root["OknoCzasowe"] = oknoCzasowe;
-    root["Jednostronny"] = chkJednostronny->isChecked();
+    root["TaktowanieSieci"] = comboTaktowanieSieci->currentIndex();
 
     return root;
 }
@@ -602,15 +647,13 @@ void MainWindow::zastosujKonfiguracjeJson(const QJsonObject &root)
         aktualizujOknoCzasowe();
     }
 
-    // Synchronizacja trybu jednostronnego/dwustronnego
-    if (root.contains("Jednostronny")) {
-        bool jednostronny = root["Jednostronny"].toBool();
-        chkJednostronny->setChecked(jednostronny);
-
-        // W trybie dwustronnym obiekt uruchamia symulację
-        if (!jednostronny && sieci.get_tryb() == Sieci::Tryb::Obiekt) {
-            petla.start();
-        }
+    if (root.contains("TaktowanieSieci")) {
+        int indeks = root["TaktowanieSieci"].toInt();
+        if (indeks < 0 || indeks > 1)
+            indeks = 0;
+        QSignalBlocker blokada(comboTaktowanieSieci);
+        comboTaktowanieSieci->setCurrentIndex(indeks);
+        m_ostatniIndeksTaktowaniaSieci = indeks;
     }
 
     m_aplikujeZdalna = false;
@@ -668,49 +711,67 @@ void MainWindow::wczytajKonfiguracje()
 
 void MainWindow::wlaczTrybRegulator()
 {
+    auto decyzja = QMessageBox::question(this,
+        "Zmiana trybu pracy",
+        "Czy na pewno chcesz przejsc w tryb regulatora sieciowego?\n"
+        "Lokalna symulacja zostanie zatrzymana.");
+    if (decyzja != QMessageBox::Yes)
+        return;
+
+    petla.stop();
+    zatrzymajSymulacjeSieciowa();
+    zresetujStanSieciowy();
+    btnStartStop->setText("Start");
     sieci.ustawParametry(static_cast<quint16>(spinPort->value()), edycjaIp->text());
     sieci.set_tryb(Sieci::Tryb::Regulator);
-
-    // Zainicjuj interwał obiektu bieżącą wartością
-    spinInterwalObiekt->setValue(spinInterwal->value());
-
-    // Tryb jednostronny - tylko regulator wykonuje takty
-    if (chkJednostronny->isChecked()) {
-        sieci.setTrybJednostronny(true);
-        sieci.setTimeoutJednostronny(spinInterwal->value() * 3); // 3 interwały timeout
-    }
-    else {
-        sieci.setTrybJednostronny(false);
-    }
-
     aktualizujStanKontrolek();
 }
 
 void MainWindow::wlaczTrybObiekt()
 {
+    auto decyzja = QMessageBox::question(this,
+        "Zmiana trybu pracy",
+        "Czy na pewno chcesz przejsc w tryb obiektu sieciowego?\n"
+        "Lokalna symulacja zostanie zatrzymana.");
+    if (decyzja != QMessageBox::Yes)
+        return;
+
+    petla.stop();
+    zatrzymajSymulacjeSieciowa();
+    zresetujStanSieciowy();
+    btnStartStop->setText("Start");
     sieci.ustawParametry(static_cast<quint16>(spinPort->value()), edycjaIp->text());
     sieci.set_tryb(Sieci::Tryb::Obiekt);
-
-    // W trybie jednostronnym obiekt tylko odpowiada na dane
-    if (chkJednostronny->isChecked()) {
-        sieci.setTrybJednostronny(true);
-    }
-    else {
-        sieci.setTrybJednostronny(false);
-    }
-
     aktualizujStanKontrolek();
 }
 
 void MainWindow::rozlaczSiec()
 {
+    auto decyzja = QMessageBox::question(this,
+        "Zmiana trybu pracy",
+        "Czy na pewno chcesz rozlaczyc i przejsc w tryb stacjonarny?");
+    if (decyzja != QMessageBox::Yes)
+        return;
+
+    const bool symulacjaAktywna = m_timerSieciowy->isActive();
+    m_rozlaczanieCelowe = true;
+    zatrzymajSymulacjeSieciowa();
     sieci.rozlacz();
-    aktualizujStanKontrolek();
+
+    if (symulacjaAktywna) {
+        kontynuujLokalniePoRozlaczeniu();
+    } else {
+        aktualizujStanKontrolek();
+    }
 }
 
 void MainWindow::onSieciPolaczono()
 {
+    m_byloPolaczenie = true;
+    m_rozlaczanieCelowe = false;
     ustawWskaznikPolaczenia(true);
+    zresetujStanSieciowy();
+    aktualizujInformacjePartnera();
     aktualizujStanKontrolek();
 
     if (sieci.get_tryb() == Sieci::Tryb::Regulator) {
@@ -720,16 +781,26 @@ void MainWindow::onSieciPolaczono()
 
 void MainWindow::onSieciRozlaczono()
 {
-    ustawWskaznikPolaczenia(false);
-    aktualizujStanKontrolek();
-}
+    const bool bylaAktywnaSymulacja = m_timerSieciowy->isActive()
+                                      || m_numerProbkiSieciowej > 0
+                                      || m_ostatniSeqSterowania > 0;
+    const bool zerwanoNieoczekiwanie = m_byloPolaczenie && !m_rozlaczanieCelowe;
 
-void MainWindow::onSieciUtraconoPolaczenie()
-{
-    // Czerwone jeśli symulacja w toku, szare jeśli zatrzymana
-    bool symulacjaAktywna = petla.isRunning();
-    ustawWskaznikPolaczenia(false, symulacjaAktywna);
+    zatrzymajSymulacjeSieciowa();
+    ustawWskaznikPolaczenia(false);
+    aktualizujInformacjePartnera();
     aktualizujStanKontrolek();
+
+    if (zerwanoNieoczekiwanie) {
+        QMessageBox::warning(this,
+                             "Zerwano polaczenie",
+                             "Polaczenie sieciowe zostalo zerwane. Symulacja moze byc kontynuowana lokalnie na aktualnych ustawieniach.");
+        if (bylaAktywnaSymulacja)
+            kontynuujLokalniePoRozlaczeniu();
+    }
+
+    m_byloPolaczenie = false;
+    m_rozlaczanieCelowe = false;
 }
 
 void MainWindow::onSieciStatusZmieniony(const QString &opis)
@@ -742,80 +813,400 @@ void MainWindow::onSieciOdebranoKonfiguracje(const QJsonObject &konfig)
     zastosujKonfiguracjeJson(konfig);
 }
 
-void MainWindow::onSieciOdebranoProbke(const ProbkaDanych &probka)
+void MainWindow::onSieciOdebranoProbke(const QJsonObject &probka)
 {
-    // W trybie jednostronnym obiekt otrzymuje próbkę z regulatora
-    // i odsyła ją z powrotem (lub sam oblicza wyjście)
-    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && chkJednostronny->isChecked()) {
-        // Oblicz wyjście obiektu na podstawie uchybu/sterowania
-        double wyjscie = petla.obliczWyjscie(probka.sterowanie);
+    zarejestrujPakietOdebrany();
 
-        // Wyślij próbkę z powrotem do regulatora
-        ProbkaDanych odpowiedz;
-        odpowiedz.numerSeq = probka.numerSeq;
-        odpowiedz.czas = probka.czas;
-        odpowiedz.wartoscZadana = probka.wartoscZadana;
-        odpowiedz.wyjscie = wyjscie;
-        odpowiedz.uchyb = probka.uchyb;
-        odpowiedz.sterowanie = probka.sterowanie;
+    const QString rodzaj = probka["rodzaj"].toString();
 
-        sieci.wyslijProbkeTekstowo(odpowiedz);
+    if (rodzaj == "komenda") {
+        obsluzKomendeSieciowa(probka);
+        return;
     }
-    // W trybie dwustronnym po stronie regulatora - aktualizuj dane z odpowiedzi obiektu
-    else if (sieci.get_tryb() == Sieci::Tryb::Regulator && !chkJednostronny->isChecked()) {
-        // Zaktualizuj dane wykresów danymi z obiektu
-        aktualizujDaneWykresow(probka.czas, probka.wartoscZadana, probka.wyjscie, probka.uchyb, probka.sterowanie);
+
+    if (rodzaj == "sterowanie") {
+        obsluzSterowanieSieciowe(probka);
+    } else if (rodzaj == "wyjscie") {
+        obsluzWyjscieSieciowe(probka);
     }
 }
 
-void MainWindow::onSieciOdebranoTaktStart()
+void MainWindow::obsluzKomendeSieciowa(const QJsonObject &probka)
 {
-    // Obiekt - uruchom taktowanie po otrzymaniu komendy od regulatora
-    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && !chkJednostronny->isChecked()) {
-        petla.start();
+    const QString komenda = probka["komenda"].toString();
+
+    if (komenda == "start") {
+        if (sieci.get_tryb() == Sieci::Tryb::Obiekt && !czySiecJednostronna()) {
+            m_timerSieciowy->setInterval(spinInterwal->value());
+            m_timerSieciowy->start();
+            btnStartStop->setText("Stop");
+            lblStatusSieci->setText("Obiekt: start z regulatora.");
+            aktualizujStanKontrolek();
+        }
+    } else if (komenda == "stop") {
+        zatrzymajSymulacjeSieciowa();
+        lblStatusSieci->setText("Stop odebrany z regulatora.");
+        aktualizujStanKontrolek();
+    } else if (komenda == "reset") {
+        m_aplikujeZdalna = true;
+        zresetujSymulacje();
+        m_aplikujeZdalna = false;
+        lblStatusSieci->setText("Reset odebrany z partnera.");
+        aktualizujStanKontrolek();
     }
 }
 
-void MainWindow::onSieciOdebranoTaktStop()
+void MainWindow::onSieciowyTimeout()
 {
-    // Obiekt - zatrzymaj taktowanie po otrzymaniu komendy od regulatora
-    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && !chkJednostronny->isChecked()) {
-        petla.stop();
+    if (sieci.get_tryb() == Sieci::Tryb::Regulator) {
+        wykonajKrokRegulatoraSieciowego();
+    } else if (sieci.get_tryb() == Sieci::Tryb::Obiekt && !czySiecJednostronna()) {
+        wykonajKrokObiektuSieciowego();
     }
 }
 
-void MainWindow::onSieciOdebranoTaktInterwal(int interwalMs)
+bool MainWindow::czyTrybSieciowy() const
 {
-    // Obiekt - zmień interwał taktowania
-    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && !chkJednostronny->isChecked()) {
-        petla.setInterwal(interwalMs);
-        spinInterwal->setValue(interwalMs);  // synchronizuj z GUI
+    return sieci.get_tryb() != Sieci::Tryb::Nieokreslony;
+}
+
+MainWindow::TaktowanieSieci MainWindow::aktualneTaktowanieSieci() const
+{
+    if (comboTaktowanieSieci && comboTaktowanieSieci->currentIndex() == 1)
+        return TaktowanieSieci::Obustronne;
+    return TaktowanieSieci::Jednostronne;
+}
+
+bool MainWindow::czySiecJednostronna() const
+{
+    return aktualneTaktowanieSieci() == TaktowanieSieci::Jednostronne;
+}
+
+void MainWindow::zresetujStanSieciowy()
+{
+    m_czasSieciowy = 0.0;
+    m_ostatnieYSieciowe = 0.0;
+    m_ostatnieUSieciowe = 0.0;
+    m_ostatnieWSieciowe = 0.0;
+    m_ostatnieESieciowe = 0.0;
+    m_ostatniePSieciowe = 0.0;
+    m_ostatnieISieciowe = 0.0;
+    m_ostatnieDSieciowe = 0.0;
+    m_ostatnieDtSieciowe = spinInterwal->value() / 1000.0;
+    m_shadowYSieciowe = 0.0;
+    m_shadowUSieciowe = 0.0;
+    m_numerProbkiSieciowej = 0;
+    m_ostatniSeqSterowania = 0;
+    m_ostatniSeqOdpowiedzi = 0;
+    m_brakiSterowaniaPodRzad = 0;
+    m_ostatniDesync = 0;
+    m_oczekujeNaOdpowiedz = false;
+    m_maNoweSterowanie = false;
+
+    if (lblSyncSieci)
+        lblSyncSieci->setText("Sync: brak danych");
+    if (lblSterowanieSieci)
+        lblSterowanieSieci->setText("Sterowanie: brak danych");
+    if (lblShadowSieci)
+        lblShadowSieci->setText("Shadow: brak danych");
+}
+
+void MainWindow::uruchomSymulacjeSieciowa()
+{
+    if (!sieci.czyPolaczony()) {
+        lblStatusSieci->setText("Najpierw połącz aplikacje w sieci.");
+        return;
     }
-    // Regulator - zaktualizuj pole interwału obiektu
-    else if (sieci.get_tryb() == Sieci::Tryb::Regulator && !chkJednostronny->isChecked()) {
-        spinInterwalObiekt->setValue(interwalMs);
+
+    if (sieci.get_tryb() == Sieci::Tryb::Obiekt && czySiecJednostronna()) {
+        lblStatusSieci->setText("Obiekt: w taktowaniu jednostronnym czeka na kroki regulatora.");
+        return;
+    }
+
+    m_timerSieciowy->setInterval(spinInterwal->value());
+    m_timerSieciowy->start();
+    btnStartStop->setText("Stop");
+
+    if (sieci.get_tryb() == Sieci::Tryb::Regulator) {
+        if (!czySiecJednostronna())
+            wyslijKomendeSieciowa("start");
+        lblStatusSieci->setText("Regulator: wysyłanie próbek sterowania.");
+    } else {
+        lblStatusSieci->setText("Obiekt: własny timer aktywny, odsyłanie próbek wyjścia.");
     }
 }
 
-void MainWindow::startObiekt()
+void MainWindow::zatrzymajSymulacjeSieciowa()
 {
-    if (!chkJednostronny->isChecked() && sieci.czyPolaczony()) {
-        sieci.wyslijTaktStart();
-    }
+    if (m_timerSieciowy->isActive())
+        m_timerSieciowy->stop();
+
+    m_oczekujeNaOdpowiedz = false;
+    m_maNoweSterowanie = false;
+    btnStartStop->setText("Start");
 }
 
-void MainWindow::stopObiekt()
+void MainWindow::wykonajKrokRegulatoraSieciowego()
 {
-    if (!chkJednostronny->isChecked() && sieci.czyPolaczony()) {
-        sieci.wyslijTaktStop();
-    }
+    if (!sieci.czyPolaczony())
+        return;
+
+    if (czySiecJednostronna() && m_oczekujeNaOdpowiedz)
+        return;
+
+    const double dt = spinInterwal->value() / 1000.0;
+    m_ostatnieDtSieciowe = dt;
+    m_czasSieciowy += dt;
+    ++m_numerProbkiSieciowej;
+
+    const double w = gen.generuj(m_czasSieciowy);
+    const double e = w - m_ostatnieYSieciowe;
+    const double u = pid.symuluj(e, dt);
+
+    m_ostatnieWSieciowe = w;
+    m_ostatnieESieciowe = e;
+    m_ostatnieUSieciowe = u;
+    m_ostatniePSieciowe = pid.pobierzOstatnieP();
+    m_ostatnieISieciowe = pid.pobierzOstatnieI();
+    m_ostatnieDSieciowe = pid.pobierzOstatnieD();
+    m_shadowYSieciowe = arx.symuluj(u);
+
+    QJsonObject probka;
+    probka["rodzaj"] = "sterowanie";
+    probka["seq"] = m_numerProbkiSieciowej;
+    probka["t"] = m_czasSieciowy;
+    probka["dt"] = dt;
+    probka["w"] = w;
+    probka["y_poprzednie"] = m_ostatnieYSieciowe;
+    probka["e"] = e;
+    probka["u"] = u;
+    probka["P"] = m_ostatniePSieciowe;
+    probka["I"] = m_ostatnieISieciowe;
+    probka["D"] = m_ostatnieDSieciowe;
+    probka["shadow_y"] = m_shadowYSieciowe;
+    probka["taktowanie"] = comboTaktowanieSieci->currentIndex();
+
+    wyslijProbkeSieciowa(probka);
+    m_oczekujeNaOdpowiedz = czySiecJednostronna();
+
+    lblSterowanieSieci->setText(QString("Sterowanie: wyslano seq %1, u=%2")
+                                    .arg(m_numerProbkiSieciowej)
+                                    .arg(u, 0, 'f', 3));
 }
 
-void MainWindow::ustawInterwalObiekt()
+void MainWindow::obsluzSterowanieSieciowe(const QJsonObject &probka)
 {
-    if (!chkJednostronny->isChecked() && sieci.czyPolaczony()) {
-        sieci.wyslijTaktInterwal(spinInterwalObiekt->value());
+    if (sieci.get_tryb() != Sieci::Tryb::Obiekt)
+        return;
+
+    m_ostatniSeqSterowania = probka["seq"].toInt();
+    m_czasSieciowy = probka["t"].toDouble(m_czasSieciowy);
+    m_ostatnieDtSieciowe = probka["dt"].toDouble(spinInterwal->value() / 1000.0);
+    m_ostatnieWSieciowe = probka["w"].toDouble();
+    m_ostatnieESieciowe = probka["e"].toDouble();
+    m_ostatnieUSieciowe = probka["u"].toDouble();
+    m_ostatniePSieciowe = probka["P"].toDouble();
+    m_ostatnieISieciowe = probka["I"].toDouble();
+    m_ostatnieDSieciowe = probka["D"].toDouble();
+    m_maNoweSterowanie = true;
+    m_brakiSterowaniaPodRzad = 0;
+    lblSterowanieSieci->setText(QString("Sterowanie: odebrano seq %1, u=%2")
+                                    .arg(m_ostatniSeqSterowania)
+                                    .arg(m_ostatnieUSieciowe, 0, 'f', 3));
+
+    if (czySiecJednostronna())
+        wykonajKrokObiektuSieciowego();
+}
+
+void MainWindow::wykonajKrokObiektuSieciowego()
+{
+    if (!sieci.czyPolaczony() || sieci.get_tryb() != Sieci::Tryb::Obiekt)
+        return;
+
+    if (!czySiecJednostronna() && !m_maNoweSterowanie && m_ostatniSeqSterowania == 0) {
+        lblSterowanieSieci->setText("Sterowanie: czekam na pierwsze u z regulatora.");
+        return;
     }
+
+    const bool brakNowegoSterowania = !czySiecJednostronna() && !m_maNoweSterowanie;
+    if (brakNowegoSterowania) {
+        ++m_brakiSterowaniaPodRzad;
+        lblSterowanieSieci->setText(QString("Sterowanie: brak nowego u, trzymam poprzednie (%1 krokow).")
+                                        .arg(m_brakiSterowaniaPodRzad));
+    }
+
+    const double eShadow = m_ostatnieWSieciowe - m_ostatnieYSieciowe;
+    m_shadowUSieciowe = pid.symuluj(eShadow, m_ostatnieDtSieciowe);
+    const double y = arx.symuluj(m_ostatnieUSieciowe);
+    m_ostatnieYSieciowe = y;
+
+    QJsonObject odpowiedz;
+    odpowiedz["rodzaj"] = "wyjscie";
+    odpowiedz["seq"] = m_ostatniSeqSterowania;
+    odpowiedz["t"] = m_czasSieciowy;
+    odpowiedz["w"] = m_ostatnieWSieciowe;
+    odpowiedz["e"] = m_ostatnieESieciowe;
+    odpowiedz["u"] = m_ostatnieUSieciowe;
+    odpowiedz["y"] = y;
+    odpowiedz["P"] = m_ostatniePSieciowe;
+    odpowiedz["I"] = m_ostatnieISieciowe;
+    odpowiedz["D"] = m_ostatnieDSieciowe;
+    odpowiedz["dt"] = m_ostatnieDtSieciowe;
+    odpowiedz["shadow_u"] = m_shadowUSieciowe;
+    odpowiedz["brak_nowego_u"] = brakNowegoSterowania;
+
+    wyslijProbkeSieciowa(odpowiedz);
+    aktualizujDaneWykresow(m_czasSieciowy,
+                           m_ostatnieWSieciowe,
+                           y,
+                           m_ostatnieESieciowe,
+                           m_ostatnieUSieciowe,
+                           m_ostatniePSieciowe,
+                           m_ostatnieISieciowe,
+                           m_ostatnieDSieciowe);
+
+    lblShadowSieci->setText(QString("Shadow: lokalny PID u=%1, roznica=%2")
+                                .arg(m_shadowUSieciowe, 0, 'f', 3)
+                                .arg(m_shadowUSieciowe - m_ostatnieUSieciowe, 0, 'f', 3));
+
+    m_maNoweSterowanie = false;
+}
+
+void MainWindow::obsluzWyjscieSieciowe(const QJsonObject &probka)
+{
+    if (sieci.get_tryb() != Sieci::Tryb::Regulator)
+        return;
+
+    const int seq = probka["seq"].toInt();
+    if (seq < m_ostatniSeqOdpowiedzi) {
+        lblSyncSieci->setText(QString("Sync: pominieto stara odpowiedz seq %1").arg(seq));
+        return;
+    }
+
+    m_ostatniSeqOdpowiedzi = seq;
+    m_ostatnieYSieciowe = probka["y"].toDouble();
+    m_oczekujeNaOdpowiedz = false;
+
+    const qint64 nadanoMs = probka["nadano_ms"].toVariant().toLongLong();
+    const qint64 opoznienieMs = nadanoMs > 0 ? QDateTime::currentMSecsSinceEpoch() - nadanoMs : 0;
+    const int desync = m_numerProbkiSieciowej - seq;
+    ustawStatusSynchronizacji(desync, opoznienieMs);
+
+    aktualizujDaneWykresow(probka["t"].toDouble(),
+                           probka["w"].toDouble(),
+                           m_ostatnieYSieciowe,
+                           probka["e"].toDouble(),
+                           probka["u"].toDouble(),
+                           probka["P"].toDouble(),
+                           probka["I"].toDouble(),
+                           probka["D"].toDouble());
+
+    const QString brakU = probka["brak_nowego_u"].toBool() ? ", obiekt trzymal poprzednie u" : "";
+    lblSterowanieSieci->setText(QString("Sterowanie: odpowiedz seq %1%2").arg(seq).arg(brakU));
+    lblShadowSieci->setText(QString("Shadow: lokalny ARX y=%1, roznica=%2")
+                                .arg(m_shadowYSieciowe, 0, 'f', 3)
+                                .arg(m_shadowYSieciowe - m_ostatnieYSieciowe, 0, 'f', 3));
+}
+
+void MainWindow::wyslijProbkeSieciowa(QJsonObject probka)
+{
+    if (!sieci.czyPolaczony())
+        return;
+
+    probka["nadano_ms"] = QString::number(QDateTime::currentMSecsSinceEpoch());
+    sieci.wyslijProbke(probka);
+    ++m_pakietyWyslaneOkno;
+    odswiezWydajnoscSieci();
+}
+
+void MainWindow::wyslijKomendeSieciowa(const QString &komenda)
+{
+    QJsonObject probka;
+    probka["rodzaj"] = "komenda";
+    probka["komenda"] = komenda;
+    probka["seq"] = m_numerProbkiSieciowej;
+    probka["t"] = m_czasSieciowy;
+    probka["dt"] = spinInterwal->value() / 1000.0;
+    probka["taktowanie"] = comboTaktowanieSieci->currentIndex();
+    wyslijProbkeSieciowa(probka);
+}
+
+void MainWindow::zarejestrujPakietOdebrany()
+{
+    ++m_pakietyOdebraneOkno;
+    odswiezWydajnoscSieci();
+}
+
+void MainWindow::odswiezWydajnoscSieci()
+{
+    if (!m_zegarWydajnosci.isValid())
+        m_zegarWydajnosci.start();
+
+    const qint64 ms = m_zegarWydajnosci.elapsed();
+    if (ms < 1000)
+        return;
+
+    const int pakiety = m_pakietyWyslaneOkno + m_pakietyOdebraneOkno;
+    const double pakietyNaSekunde = pakiety * 1000.0 / ms;
+    lblWydajnoscSieci->setText(QString("Pakiety/s: %1 (TX %2, RX %3)")
+                                   .arg(pakietyNaSekunde, 0, 'f', 1)
+                                   .arg(m_pakietyWyslaneOkno)
+                                   .arg(m_pakietyOdebraneOkno));
+
+    const bool saProbki = (m_numerProbkiSieciowej > 0 || m_ostatniSeqSterowania > 0);
+    if (saProbki) {
+        const double oczekiwane = 2000.0 / qMax(1, spinInterwal->value());
+        const bool wydajnoscOk = pakietyNaSekunde >= oczekiwane * 0.6;
+        const bool syncOk = std::abs(m_ostatniDesync) <= 2;
+        const bool sterowanieOk = m_brakiSterowaniaPodRzad < 3;
+        ustawLampkeWydajnosci(wydajnoscOk && syncOk && sterowanieOk,
+                              wydajnoscOk && syncOk && sterowanieOk
+                                  ? "Wyrabia sie"
+                                  : "Nie wyrabia sie: sprawdz pakiety/s, desync albo brak sterowania");
+    } else {
+        ustawLampkeWydajnosci(true, "Polaczenie gotowe, brak aktywnej transmisji probek");
+    }
+
+    m_pakietyWyslaneOkno = 0;
+    m_pakietyOdebraneOkno = 0;
+    m_zegarWydajnosci.restart();
+}
+
+void MainWindow::ustawLampkeWydajnosci(bool ok, const QString &opis)
+{
+    const QString kolor = ok ? "#2ecc40" : "#ff4136";
+    const QString ramka = ok ? "#186a1f" : "#8a1f17";
+    lblLampkaWydajnosci->setStyleSheet(
+        QString("background-color: %1; border-radius: 9px; border: 1px solid %2;")
+            .arg(kolor, ramka));
+    lblLampkaWydajnosci->setToolTip(opis);
+    lblWydajnoscSieci->setToolTip(opis);
+}
+
+void MainWindow::ustawStatusSynchronizacji(int desync, qint64 opoznienieMs)
+{
+    m_ostatniDesync = desync;
+    lblSyncSieci->setText(QString("Sync: desync=%1 probek, opoznienie=%2 ms")
+                              .arg(desync)
+                              .arg(opoznienieMs));
+
+    const bool ok = std::abs(desync) <= 1 && opoznienieMs <= spinInterwal->value() * 2;
+    if (!ok)
+        ustawLampkeWydajnosci(false, "Wykryto opoznienie albo desynchronizacje probek");
+}
+
+void MainWindow::aktualizujInformacjePartnera()
+{
+    lblPartnerSieci->setText(QString("Partner: %1").arg(sieci.opisPartnera()));
+}
+
+void MainWindow::kontynuujLokalniePoRozlaczeniu()
+{
+    petla.ustawStan(m_czasSieciowy, m_ostatnieYSieciowe);
+    petla.start();
+    btnStartStop->setText("Stop");
+    lblStatusSieci->setText("Tryb lokalny: kontynuacja po zerwaniu polaczenia.");
+    aktualizujStanKontrolek();
 }
 
 
@@ -835,39 +1226,34 @@ void MainWindow::aktualizujStanKontrolek()
 
     const bool regulator = (tryb == Sieci::Tryb::Regulator);
     const bool obiekt = (tryb == Sieci::Tryb::Obiekt);
+    const bool lokalnie = !trybWybrany;
+    const bool obiektZTimerem = obiekt && !czySiecJednostronna();
 
-    bool mozePID = !trybWybrany || regulator;
+    bool mozePID = lokalnie || regulator;
     grpPid->setEnabled(mozePID);
     grpGen->setEnabled(mozePID);
 
-    bool mozeARX = !trybWybrany || obiekt;
+    bool mozeARX = lokalnie || obiekt;
     btnArx->setEnabled(mozeARX);
 
-    btnStartStop->setEnabled(mozePID && (!trybWybrany || polaczony));
-    btnReset->setEnabled(mozePID);
-    spinInterwal->setEnabled(mozePID);
+    bool mozeStart = lokalnie || (polaczony && (regulator || obiektZTimerem));
+    btnStartStop->setEnabled(mozeStart);
+    btnReset->setEnabled(lokalnie || trybWybrany);
+    spinInterwal->setEnabled(lokalnie || regulator || obiektZTimerem);
+    comboTaktowanieSieci->setEnabled(lokalnie || (regulator && !m_timerSieciowy->isActive()));
 
     btnWczytajJson->setEnabled(mozePID);
-
-    // Sterowanie obiektem - tylko w trybie dwustronnym i regulatorze
-    bool mozeSterowacObiektem = regulator && !chkJednostronny->isChecked();
-    grpSterowanieObiektu->setEnabled(mozeSterowacObiektem);
 }
 
-void MainWindow::ustawWskaznikPolaczenia(bool polaczony, bool ostrzezenie)
+void MainWindow::ustawWskaznikPolaczenia(bool polaczony)
 {
-    if (ostrzezenie) {
-        lblWskaznikPolaczenia->setStyleSheet(
-            "background-color: #ff4136; border-radius: 9px; border: 1px solid #a3140c;");
-        lblWskaznikPolaczenia->setToolTip("Ostrzezenie - symulacja nie wyrabia!");
-    }
-    else if (polaczony) {
+    if (polaczony) {
         lblWskaznikPolaczenia->setStyleSheet(
             "background-color: #2ecc40; border-radius: 9px; border: 1px solid #186a1f;");
-        lblWskaznikPolaczenia->setToolTip("Polaczone");
+        lblWskaznikPolaczenia->setToolTip("Połączono");
     } else {
         lblWskaznikPolaczenia->setStyleSheet(
             "background-color: #b0b0b0; border-radius: 9px; border: 1px solid #555;");
-        lblWskaznikPolaczenia->setToolTip("Rozlaczone");
+        lblWskaznikPolaczenia->setToolTip("Rozłączono");
     }
 }

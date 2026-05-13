@@ -1,18 +1,117 @@
 #include "Sieci.h"
-#include <QTimer>
+
+#include <QDataStream>
+
+namespace {
+const QString FORMAT_PROBKI = "UAR_PROBKA_BIN_1";
+
+double pobierzDouble(const QJsonObject &obj, const QString &klucz)
+{
+        return obj.value(klucz).toDouble();
+}
+
+int pobierzInt(const QJsonObject &obj, const QString &klucz)
+{
+        return obj.value(klucz).toInt();
+}
+
+qint64 pobierzInt64(const QJsonObject &obj, const QString &klucz)
+{
+        return obj.value(klucz).toVariant().toLongLong();
+}
+
+QByteArray serializujProbkeBinarnie(const QJsonObject &probka)
+{
+        QByteArray payload;
+        QDataStream out(&payload, QIODevice::WriteOnly);
+        out.setVersion(QDataStream::Qt_5_15);
+
+        out << FORMAT_PROBKI;
+        out << probka.value("rodzaj").toString();
+        out << probka.value("komenda").toString();
+        out << static_cast<qint32>(pobierzInt(probka, "seq"));
+        out << pobierzDouble(probka, "t");
+        out << pobierzDouble(probka, "dt");
+        out << pobierzDouble(probka, "w");
+        out << pobierzDouble(probka, "y");
+        out << pobierzDouble(probka, "y_poprzednie");
+        out << pobierzDouble(probka, "e");
+        out << pobierzDouble(probka, "u");
+        out << pobierzDouble(probka, "P");
+        out << pobierzDouble(probka, "I");
+        out << pobierzDouble(probka, "D");
+        out << pobierzDouble(probka, "shadow_y");
+        out << pobierzDouble(probka, "shadow_u");
+        out << static_cast<qint32>(pobierzInt(probka, "taktowanie"));
+        out << pobierzInt64(probka, "nadano_ms");
+        out << probka.value("brak_nowego_u").toBool();
+
+        return payload;
+}
+
+QJsonObject deserializujProbkeBinarnie(const QByteArray &payload)
+{
+        QJsonObject probka;
+        QDataStream in(payload);
+        in.setVersion(QDataStream::Qt_5_15);
+
+        QString format;
+        QString rodzaj;
+        QString komenda;
+        qint32 seq = 0;
+        qint32 taktowanie = 0;
+        qint64 nadanoMs = 0;
+        bool brakNowegoU = false;
+        double t = 0.0;
+        double dt = 0.0;
+        double w = 0.0;
+        double y = 0.0;
+        double yPoprzednie = 0.0;
+        double e = 0.0;
+        double u = 0.0;
+        double p = 0.0;
+        double i = 0.0;
+        double d = 0.0;
+        double shadowY = 0.0;
+        double shadowU = 0.0;
+
+        in >> format;
+        if (format != FORMAT_PROBKI || in.status() != QDataStream::Ok)
+                return probka;
+
+        in >> rodzaj >> komenda >> seq >> t >> dt >> w >> y >> yPoprzednie >> e >> u >> p >> i
+           >> d >> shadowY >> shadowU >> taktowanie >> nadanoMs >> brakNowegoU;
+
+        if (in.status() != QDataStream::Ok)
+                return QJsonObject();
+
+        probka["rodzaj"] = rodzaj;
+        probka["komenda"] = komenda;
+        probka["seq"] = seq;
+        probka["t"] = t;
+        probka["dt"] = dt;
+        probka["w"] = w;
+        probka["y"] = y;
+        probka["y_poprzednie"] = yPoprzednie;
+        probka["e"] = e;
+        probka["u"] = u;
+        probka["P"] = p;
+        probka["I"] = i;
+        probka["D"] = d;
+        probka["shadow_y"] = shadowY;
+        probka["shadow_u"] = shadowU;
+        probka["taktowanie"] = taktowanie;
+        probka["nadano_ms"] = QString::number(nadanoMs);
+        probka["brak_nowego_u"] = brakNowegoU;
+
+        return probka;
+}
+}
 
 Sieci::Sieci(QObject *parent)
     : QObject(parent)
-    , m_timerTimeout(new QTimer(this))
-    , m_timerOdswiezania(new QTimer(this))
 {
         connect(&m_server, &QTcpServer::newConnection, this, &Sieci::onNewConnection);
-
-        m_timerTimeout->setSingleShot(true);
-        connect(m_timerTimeout, &QTimer::timeout, this, &Sieci::sprawdzTimeout);
-
-        m_timerOdswiezania->setInterval(500);
-        connect(m_timerOdswiezania, &QTimer::timeout, this, &Sieci::resetujTimeout);
 }
 
 Sieci::~Sieci()
@@ -29,6 +128,14 @@ void Sieci::ustawParametry(quint16 port, const QString &host)
 bool Sieci::czyPolaczony() const
 {
         return m_socket && m_socket->state() == QAbstractSocket::ConnectedState;
+}
+
+QString Sieci::opisPartnera() const
+{
+        if (!czyPolaczony())
+                return "brak";
+
+        return QString("%1:%2").arg(m_socket->peerAddress().toString()).arg(m_socket->peerPort());
 }
 
 void Sieci::set_tryb(Tryb tryb)
@@ -110,6 +217,10 @@ void Sieci::onConnected()
 void Sieci::onDisconnected()
 {
         qDebug() << "Sieci: rozłączono";
+        m_tryb = Nieokreslony;
+        if (m_server.isListening()) {
+                m_server.close();
+        }
         emit statusZmieniony("Rozłączono");
         emit rozlaczono();
 
@@ -151,90 +262,17 @@ void Sieci::wyslijKonfiguracje(const QJsonObject &konfig)
         wyslijPakiet(PAKIET_KONFIG, doc.toJson(QJsonDocument::Compact));
 }
 
-void Sieci::wyslijProbkeBinarnie(const ProbkaDanych &probka)
+void Sieci::wyslijProbke(const QJsonObject &probka)
 {
         if (!czyPolaczony())
                 return;
 
-        wyslijPakiet(PAKIET_PROBKA, probka.toBinary());
-}
-
-void Sieci::wyslijProbkeTekstowo(const ProbkaDanych &probka)
-{
-        if (!czyPolaczony())
-                return;
-
-        QJsonDocument doc(probka.toJson());
-        wyslijPakiet(PAKIET_PROBKA, doc.toJson(QJsonDocument::Compact));
-}
-
-void Sieci::setTimeoutJednostronny(int timeoutMs)
-{
-        m_timeoutJednostronny = timeoutMs;
-}
-
-void Sieci::setTrybJednostronny(bool jednostronny)
-{
-        m_trybJednostronny = jednostronny;
-
-        if (m_trybJednostronny) {
-                m_timerOdswiezania->start();
+        if (m_serializacjaProbek == SER_BINARNA) {
+                wyslijPakiet(PAKIET_PROBKA, serializujProbkeBinarnie(probka));
+        } else {
+                QJsonDocument doc(probka);
+                wyslijPakiet(PAKIET_PROBKA, doc.toJson(QJsonDocument::Compact));
         }
-        else {
-                m_timerOdswiezania->stop();
-                m_timerTimeout->stop();
-        }
-}
-
-void Sieci::resetujTimeout()
-{
-        if (m_timerTimeout->isActive()) {
-                m_timerTimeout->stop();
-        }
-        m_timerTimeout->start(m_timeoutJednostronny);
-}
-
-void Sieci::sprawdzTimeout()
-{
-        if (!m_trybJednostronny)
-                return;
-
-        // W trybie jednostronnym - sprawdź czy czekamy na sterowanie
-        if (m_czekamNaSterowanie) {
-                qDebug() << "Sieci: timeout - brak sterowania od obiektu";
-                emit statusZmieniony("Brak sterowania - utracono polaczenie");
-                emit utraconoPolaczenie();
-        }
-}
-
-void Sieci::wyslijTaktStart()
-{
-        if (!czyPolaczony())
-                return;
-
-        wyslijPakiet(PAKIET_TAKT_START, QByteArray());
-        qDebug() << "Sieci: wysłano TAKT_START";
-}
-
-void Sieci::wyslijTaktStop()
-{
-        if (!czyPolaczony())
-                return;
-
-        wyslijPakiet(PAKIET_TAKT_STOP, QByteArray());
-        qDebug() << "Sieci: wysłano TAKT_STOP";
-}
-
-void Sieci::wyslijTaktInterwal(int interwalMs)
-{
-        if (!czyPolaczony())
-                return;
-
-        QByteArray dane;
-        QDataStream out(&dane, QIODevice::WriteOnly);
-        out << interwalMs;
-        wyslijPakiet(PAKIET_TAKT_INTERWAL, dane);
-        qDebug() << "Sieci: wysłano TAKT_INTERWAL:" << interwalMs;
 }
 
 void Sieci::wyslijPakiet(TypPakietu typ, const QByteArray &payload)
@@ -288,45 +326,16 @@ void Sieci::parsujBufor()
                                 qDebug() << "Sieci: odebrano konfigurację";
                                 emit odebranoKonfiguracje(doc.object());
                         }
-                }
-                else if (typ == PAKIET_PROBKA) {
-                        // Próbuj najpierw jako JSON (tekstowy)
-                        QJsonDocument doc = QJsonDocument::fromJson(payload);
-                        if (doc.isObject()) {
-                                ProbkaDanych p = ProbkaDanych::fromJson(doc.object());
-                                qDebug() << "Sieci: odebrano próbkę tekstową n=" << p.numerSeq;
-                                emit odebranoProbkeTekstowa(p);
-
-                                // Resetuj flagę czekania na sterowanie
-                                m_czekamNaSterowanie = false;
+                } else if (typ == PAKIET_PROBKA) {
+                        QJsonObject probka = deserializujProbkeBinarnie(payload);
+                        if (probka.isEmpty()) {
+                                QJsonDocument doc = QJsonDocument::fromJson(payload);
+                                if (doc.isObject())
+                                        probka = doc.object();
                         }
-                        else {
-                                // Spróbuj jako format binarny
-                                ProbkaDanych p = ProbkaDanych::fromBinary(payload);
-                                qDebug() << "Sieci: odebrano próbkę binarną n=" << p.numerSeq;
-                                emit odebranoProbkeBinarna(p);
-                                m_czekamNaSterowanie = false;
+                        if (!probka.isEmpty()) {
+                                emit odebranoProbke(probka);
                         }
-                }
-                else if (typ == PAKIET_TAKT_START) {
-                        qDebug() << "Sieci: odebrano TAKT_START";
-                        emit odebranoTaktStart();
-                }
-                else if (typ == PAKIET_TAKT_STOP) {
-                        qDebug() << "Sieci: odebrano TAKT_STOP";
-                        emit odebranoTaktStop();
-                }
-                else if (typ == PAKIET_TAKT_INTERWAL) {
-                        QDataStream in(payload);
-                        int interwal;
-                        in >> interwal;
-                        qDebug() << "Sieci: odebrano TAKT_INTERWAL:" << interwal;
-                        emit odebranoTaktInterwal(interwal);
-                }
-
-                // Resetuj timeout przy odbiorze czegokolwiek w trybie jednostronnym
-                if (m_trybJednostronny) {
-                        resetujTimeout();
                 }
         }
 }

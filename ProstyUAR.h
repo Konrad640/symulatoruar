@@ -18,13 +18,10 @@ public:
     void stop();
     void reset();
     void setInterwal(int ms);
+    void ustawStan(double aktualnyCzas, double ostatnieWyjscie);
     int getInterwal() const { return m_interwalMs; }
-    bool isRunning() const { return m_timer->isActive(); }
 
     double symuluj(double wartosc_zadana, double dt = 1.0);
-
-    // Oblicza wyjście obiektu dla danego sterowania (dla trybu jednostronnego)
-    double obliczWyjscie(double sterowanie);
 
 signals:
     void krokWykonany(double t, double w, double y, double e, double u);

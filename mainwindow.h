@@ -3,12 +3,14 @@
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTimer>
 #include <QtCharts>
 
 #include "Generator.h"
@@ -48,20 +50,14 @@ private slots:
     void rozlaczSiec();
     void onSieciPolaczono();
     void onSieciRozlaczono();
-    void onSieciUtraconoPolaczenie();
     void onSieciStatusZmieniony(const QString &opis);
     void onSieciOdebranoKonfiguracje(const QJsonObject &konfig);
-    void onSieciOdebranoProbke(const ProbkaDanych &probka);
-    void onSieciOdebranoTaktStart();
-    void onSieciOdebranoTaktStop();
-    void onSieciOdebranoTaktInterwal(int interwalMs);
-
-    // Sterowanie timerem obiektu (tylko w trybie dwustronnym)
-    void startObiekt();
-    void stopObiekt();
-    void ustawInterwalObiekt();
+    void onSieciOdebranoProbke(const QJsonObject &probka);
+    void onSieciowyTimeout();
 
 private:
+    enum class TaktowanieSieci { Jednostronne, Obustronne };
+
     ModelARX arx;
     RegulatorPID pid;
     Generator gen;
@@ -69,6 +65,31 @@ private:
 
     double oknoCzasowe;
     bool   m_aplikujeZdalna;
+    QTimer *m_timerSieciowy;
+    double m_czasSieciowy;
+    double m_ostatnieYSieciowe;
+    double m_ostatnieUSieciowe;
+    double m_ostatnieWSieciowe;
+    double m_ostatnieESieciowe;
+    double m_ostatniePSieciowe;
+    double m_ostatnieISieciowe;
+    double m_ostatnieDSieciowe;
+    double m_ostatnieDtSieciowe;
+    double m_shadowYSieciowe;
+    double m_shadowUSieciowe;
+    int    m_numerProbkiSieciowej;
+    int    m_ostatniSeqSterowania;
+    int    m_ostatniSeqOdpowiedzi;
+    int    m_brakiSterowaniaPodRzad;
+    int    m_pakietyWyslaneOkno;
+    int    m_pakietyOdebraneOkno;
+    int    m_ostatniDesync;
+    bool   m_oczekujeNaOdpowiedz;
+    bool   m_maNoweSterowanie;
+    bool   m_rozlaczanieCelowe;
+    bool   m_byloPolaczenie;
+    int    m_ostatniIndeksTaktowaniaSieci;
+    QElapsedTimer m_zegarWydajnosci;
 
     // GUI - Kontrolki
     QLineEdit *edycjaKp, *edycjaTi, *edycjaTd;
@@ -93,15 +114,18 @@ private:
     QPushButton *btnTrybRegulator;
     QPushButton *btnTrybObiekt;
     QPushButton *btnRozlacz;
-    QCheckBox *chkJednostronny;
-    QGroupBox *grpSterowanieObiektu;
-    QPushButton *btnStartObiekt;
-    QPushButton *btnStopObiekt;
-    QSpinBox *spinInterwalObiekt;
     QLineEdit *edycjaIp;
     QSpinBox *spinPort;
     QLabel *lblStatusSieci;
     QLabel *lblWskaznikPolaczenia;
+    QComboBox *comboTaktowanieSieci;
+    QComboBox *comboSerializacja;
+    QLabel *lblPartnerSieci;
+    QLabel *lblSyncSieci;
+    QLabel *lblSterowanieSieci;
+    QLabel *lblWydajnoscSieci;
+    QLabel *lblLampkaWydajnosci;
+    QLabel *lblShadowSieci;
 
     QGroupBox *grpPid;
     QGroupBox *grpGen;
@@ -117,12 +141,33 @@ private:
     void konfigurujGUI();
     void konfigurujWykresy();
     void aktualizujDaneWykresow(double t, double w, double y, double e, double u);
+    void aktualizujDaneWykresow(
+        double t, double w, double y, double e, double u, double p, double i, double d);
 
     QJsonObject zbudujKonfiguracjeJson() const;
     void zastosujKonfiguracjeJson(const QJsonObject &konfig);
     void wyslijKonfiguracjeJesliPolaczony();
     void aktualizujStanKontrolek();
-    void ustawWskaznikPolaczenia(bool polaczony, bool ostrzezenie = false);
+    void ustawWskaznikPolaczenia(bool polaczony);
+    void zresetujStanSieciowy();
+    void uruchomSymulacjeSieciowa();
+    void zatrzymajSymulacjeSieciowa();
+    bool czyTrybSieciowy() const;
+    bool czySiecJednostronna() const;
+    TaktowanieSieci aktualneTaktowanieSieci() const;
+    void wykonajKrokRegulatoraSieciowego();
+    void wykonajKrokObiektuSieciowego();
+    void obsluzSterowanieSieciowe(const QJsonObject &probka);
+    void obsluzWyjscieSieciowe(const QJsonObject &probka);
+    void obsluzKomendeSieciowa(const QJsonObject &probka);
+    void wyslijProbkeSieciowa(QJsonObject probka);
+    void wyslijKomendeSieciowa(const QString &komenda);
+    void zarejestrujPakietOdebrany();
+    void odswiezWydajnoscSieci();
+    void ustawLampkeWydajnosci(bool ok, const QString &opis);
+    void ustawStatusSynchronizacji(int desync, qint64 opoznienieMs);
+    void aktualizujInformacjePartnera();
+    void kontynuujLokalniePoRozlaczeniu();
 };
 
 #endif // MAINWINDOW_H
