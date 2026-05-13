@@ -1,9 +1,18 @@
 #include "Sieci.h"
+#include <QTimer>
 
 Sieci::Sieci(QObject *parent)
     : QObject(parent)
+    , m_timerTimeout(new QTimer(this))
+    , m_timerOdswiezania(new QTimer(this))
 {
         connect(&m_server, &QTcpServer::newConnection, this, &Sieci::onNewConnection);
+
+        m_timerTimeout->setSingleShot(true);
+        connect(m_timerTimeout, &QTimer::timeout, this, &Sieci::sprawdzTimeout);
+
+        m_timerOdswiezania->setInterval(500);
+        connect(m_timerOdswiezania, &QTimer::timeout, this, &Sieci::resetujTimeout);
 }
 
 Sieci::~Sieci()
@@ -24,8 +33,6 @@ bool Sieci::czyPolaczony() const
 
 void Sieci::set_tryb(Tryb tryb)
 {
-        // Zawsze zaczynamy od czystego stanu - unika przecieków
-        // przy ponownym kliknięciu tego samego trybu.
         czyscPolaczenie();
         m_tryb = tryb;
 
@@ -65,7 +72,6 @@ void Sieci::onNewConnection()
         if (!nowy)
                 return;
 
-        // Tylko jedno połączenie na raz - odrzucamy dodatkowych klientów.
         if (m_socket) {
                 nowy->disconnectFromHost();
                 nowy->deleteLater();
@@ -145,6 +151,92 @@ void Sieci::wyslijKonfiguracje(const QJsonObject &konfig)
         wyslijPakiet(PAKIET_KONFIG, doc.toJson(QJsonDocument::Compact));
 }
 
+void Sieci::wyslijProbkeBinarnie(const ProbkaDanych &probka)
+{
+        if (!czyPolaczony())
+                return;
+
+        wyslijPakiet(PAKIET_PROBKA, probka.toBinary());
+}
+
+void Sieci::wyslijProbkeTekstowo(const ProbkaDanych &probka)
+{
+        if (!czyPolaczony())
+                return;
+
+        QJsonDocument doc(probka.toJson());
+        wyslijPakiet(PAKIET_PROBKA, doc.toJson(QJsonDocument::Compact));
+}
+
+void Sieci::setTimeoutJednostronny(int timeoutMs)
+{
+        m_timeoutJednostronny = timeoutMs;
+}
+
+void Sieci::setTrybJednostronny(bool jednostronny)
+{
+        m_trybJednostronny = jednostronny;
+
+        if (m_trybJednostronny) {
+                m_timerOdswiezania->start();
+        }
+        else {
+                m_timerOdswiezania->stop();
+                m_timerTimeout->stop();
+        }
+}
+
+void Sieci::resetujTimeout()
+{
+        if (m_timerTimeout->isActive()) {
+                m_timerTimeout->stop();
+        }
+        m_timerTimeout->start(m_timeoutJednostronny);
+}
+
+void Sieci::sprawdzTimeout()
+{
+        if (!m_trybJednostronny)
+                return;
+
+        // W trybie jednostronnym - sprawdź czy czekamy na sterowanie
+        if (m_czekamNaSterowanie) {
+                qDebug() << "Sieci: timeout - brak sterowania od obiektu";
+                emit statusZmieniony("Brak sterowania - utracono polaczenie");
+                emit utraconoPolaczenie();
+        }
+}
+
+void Sieci::wyslijTaktStart()
+{
+        if (!czyPolaczony())
+                return;
+
+        wyslijPakiet(PAKIET_TAKT_START, QByteArray());
+        qDebug() << "Sieci: wysłano TAKT_START";
+}
+
+void Sieci::wyslijTaktStop()
+{
+        if (!czyPolaczony())
+                return;
+
+        wyslijPakiet(PAKIET_TAKT_STOP, QByteArray());
+        qDebug() << "Sieci: wysłano TAKT_STOP";
+}
+
+void Sieci::wyslijTaktInterwal(int interwalMs)
+{
+        if (!czyPolaczony())
+                return;
+
+        QByteArray dane;
+        QDataStream out(&dane, QIODevice::WriteOnly);
+        out << interwalMs;
+        wyslijPakiet(PAKIET_TAKT_INTERWAL, dane);
+        qDebug() << "Sieci: wysłano TAKT_INTERWAL:" << interwalMs;
+}
+
 void Sieci::wyslijPakiet(TypPakietu typ, const QByteArray &payload)
 {
         if (!czyPolaczony())
@@ -152,8 +244,7 @@ void Sieci::wyslijPakiet(TypPakietu typ, const QByteArray &payload)
 
         QByteArray naglowek;
         QDataStream out(&naglowek, QIODevice::WriteOnly);
-        // NAPRAWIONE: jawnie ustawiona wersja QDataStream - gwarantuje zgodność
-        // formatu między instancjami niezależnie od wersji Qt.
+
         out.setVersion(QDataStream::Qt_5_15);
         out << static_cast<quint8>(typ);
         out << static_cast<quint32>(payload.size());
@@ -185,7 +276,6 @@ void Sieci::parsujBufor()
                 in >> typ >> rozmiar;
 
                 if (m_bufor.size() < ROZMIAR_NAGLOWKA + (int) rozmiar) {
-                        // Niepełny pakiet - czekamy na kolejne readyRead
                         return;
                 }
 
@@ -199,6 +289,44 @@ void Sieci::parsujBufor()
                                 emit odebranoKonfiguracje(doc.object());
                         }
                 }
-                // PAKIET_PROBKA - obsługa w kolejnym etapie (symulacja sieciowa)
+                else if (typ == PAKIET_PROBKA) {
+                        // Próbuj najpierw jako JSON (tekstowy)
+                        QJsonDocument doc = QJsonDocument::fromJson(payload);
+                        if (doc.isObject()) {
+                                ProbkaDanych p = ProbkaDanych::fromJson(doc.object());
+                                qDebug() << "Sieci: odebrano próbkę tekstową n=" << p.numerSeq;
+                                emit odebranoProbkeTekstowa(p);
+
+                                // Resetuj flagę czekania na sterowanie
+                                m_czekamNaSterowanie = false;
+                        }
+                        else {
+                                // Spróbuj jako format binarny
+                                ProbkaDanych p = ProbkaDanych::fromBinary(payload);
+                                qDebug() << "Sieci: odebrano próbkę binarną n=" << p.numerSeq;
+                                emit odebranoProbkeBinarna(p);
+                                m_czekamNaSterowanie = false;
+                        }
+                }
+                else if (typ == PAKIET_TAKT_START) {
+                        qDebug() << "Sieci: odebrano TAKT_START";
+                        emit odebranoTaktStart();
+                }
+                else if (typ == PAKIET_TAKT_STOP) {
+                        qDebug() << "Sieci: odebrano TAKT_STOP";
+                        emit odebranoTaktStop();
+                }
+                else if (typ == PAKIET_TAKT_INTERWAL) {
+                        QDataStream in(payload);
+                        int interwal;
+                        in >> interwal;
+                        qDebug() << "Sieci: odebrano TAKT_INTERWAL:" << interwal;
+                        emit odebranoTaktInterwal(interwal);
+                }
+
+                // Resetuj timeout przy odbiorze czegokolwiek w trybie jednostronnym
+                if (m_trybJednostronny) {
+                        resetujTimeout();
+                }
         }
 }

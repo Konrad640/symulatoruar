@@ -1,6 +1,7 @@
 #include "ModelARX.h"
 #include "ProstyUAR.h"
 #include "RegulatorPID.h"
+#include "Generator.h" // <--- DODANO NAGŁÓWEK
 #include <cmath>
 #include <iomanip>
 #include <iostream>
@@ -330,7 +331,8 @@ void TESTY_ProstyUAR::test_UAR_1_brakPobudzenia()
     std::cerr << "UAR_1 -> test zerowego pobudzenia: ";
     RegulatorPID pid(0.5, 5.0, 0.2);
     ModelARX arx({-0.4}, {0.6});
-    ProstyUAR uar(arx, pid);
+    Generator gen(Generator::TypSygnalu::PROSTOKATNY, 0.0, 0.0, 10.0, 0.5, 1.0); // <--- DODANY GENERATOR
+    ProstyUAR uar(arx, pid, gen);
     std::vector<double> spodz(30, 0.0), fakt(30);
     for (int i = 0; i < 30; i++)
         fakt[i] = uar.symuluj(0.0);
@@ -342,7 +344,8 @@ void TESTY_ProstyUAR::test_UAR_1_skokJednostkowyPID()
     std::cerr << "UAR_1 PID -> test skoku jednostkowego: ";
     RegulatorPID pid(0.5, 5.0, 0.2);
     ModelARX arx({-0.4}, {0.6});
-    ProstyUAR uar(arx, pid);
+    Generator gen(Generator::TypSygnalu::PROSTOKATNY, 0.0, 0.0, 10.0, 0.5, 1.0); // <--- DODANY GENERATOR
+    ProstyUAR uar(arx, pid, gen);
     std::vector<double> spodz = {0.0,      0.0,      0.54,     0.756,    0.6708,   0.64008,
                                  0.729,    0.810437, 0.834499, 0.843338, 0.8664,   0.8936,
                                  0.911886, 0.923312, 0.93404,  0.944929, 0.954065, 0.961042,
@@ -359,7 +362,8 @@ void TESTY_ProstyUAR::test_UAR_2_skokJednostkowyPID()
     std::cerr << "UAR_2 PID -> test skoku jednostkowego: ";
     RegulatorPID pid(0.5, 5.0, 0.2);
     ModelARX arx({-0.4}, {0.6}, 2);
-    ProstyUAR uar(arx, pid);
+    Generator gen(Generator::TypSygnalu::PROSTOKATNY, 0.0, 0.0, 10.0, 0.5, 1.0); // <--- DODANY GENERATOR
+    ProstyUAR uar(arx, pid, gen);
     std::vector<double> spodz = {0.0,      0.0,      0.0,      0.54,     0.756,    0.9624,
                                  0.87336,  0.841104, 0.771946, 0.821644, 0.863453, 0.93272,
                                  0.952656, 0.965421, 0.954525, 0.955787, 0.957472, 0.969711,
@@ -376,7 +380,8 @@ void TESTY_ProstyUAR::test_UAR_3_skokJednostkowyPID()
     std::cerr << "UAR_3 PID -> test skoku jednostkowego: ";
     RegulatorPID pid(1.0, 2.0, 0.2);
     ModelARX arx({-0.4}, {0.6}, 1);
-    ProstyUAR uar(arx, pid);
+    Generator gen(Generator::TypSygnalu::PROSTOKATNY, 0.0, 0.0, 10.0, 0.5, 1.0);
+    ProstyUAR uar(arx, pid, gen);
     std::vector<double> spodz = {0.0,      0.0,      1.02,     1.608,    1.1028,   0.41736,
                                  0.546648, 1.20605,  1.43047,  0.999176, 0.615056, 0.799121,
                                  1.21304,  1.26025,  0.939289, 0.748507, 0.927166, 1.17292,
@@ -564,7 +569,8 @@ void TESTY_Dodatkowe::test_UAR_ZmianaWartosciZadanej()
     try {
         RegulatorPID pid(1.0);          // P=1
         ModelARX arx({-0.5}, {0.5}, 1); // Prosty obiekt I rzędu
-        ProstyUAR uar(arx, pid);
+        Generator gen(Generator::TypSygnalu::PROSTOKATNY, 0.0, 0.0, 10.0, 0.5, 1.0); // <--- DODANY GENERATOR
+        ProstyUAR uar(arx, pid, gen);
 
         // Stabilizacja na 1
         for (int i = 0; i < 10; i++)
@@ -593,7 +599,8 @@ void TESTY_Dodatkowe::test_UAR_UkladNiestabilny()
     try {
         RegulatorPID pid(50.0); // Ogromne wzmocnienie
         ModelARX arx({-0.9}, {1.0}, 1);
-        ProstyUAR uar(arx, pid);
+        Generator gen(Generator::TypSygnalu::PROSTOKATNY, 0.0, 0.0, 10.0, 0.5, 1.0); // <--- DODANY GENERATOR
+        ProstyUAR uar(arx, pid, gen);
 
         uar.symuluj(1.0);
         double y1 = uar.symuluj(1.0);
@@ -619,10 +626,11 @@ void TESTY_Dodatkowe::test_UAR_UchybUstalonyPI()
     std::cerr << "NOWY: UAR -> redukcja uchybu przez czlon I: ";
     try {
         ModelARX arx({-0.8}, {0.2}, 1); // Obiekt ze wzmocnieniem statycznym 1.0 (0.2 / (1-0.8))
+        Generator gen(Generator::TypSygnalu::PROSTOKATNY, 0.0, 0.0, 10.0, 0.5, 1.0); // <--- DODANY GENERATOR
 
         // Regulator P
         RegulatorPID regP(1.0);
-        ProstyUAR uarP(arx, regP);
+        ProstyUAR uarP(arx, regP, gen); // <--- PODANY GENERATOR
         double yP = 0;
         for (int i = 0; i < 50; i++)
             yP = uarP.symuluj(1.0);
@@ -630,7 +638,7 @@ void TESTY_Dodatkowe::test_UAR_UchybUstalonyPI()
 
         // Regulator PI
         RegulatorPID regPI(1.0, 2.0);
-        ProstyUAR uarPI(arx, regPI);
+        ProstyUAR uarPI(arx, regPI, gen); // <--- PODANY GENERATOR
         double yPI = 0;
         for (int i = 0; i < 50; i++)
             yPI = uarPI.symuluj(1.0);

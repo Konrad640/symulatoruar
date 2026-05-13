@@ -18,6 +18,11 @@ void RegulatorPID::zresetuj()
     ostatnie_I = 0.0;
     ostatnie_D = 0.0;
 }
+void RegulatorPID::zresetujCalke() {
+    suma_uchybow = 0.0;
+    calka_wewnetrzna = 0.0;
+    ostatnie_I=0.0;
+}
 
 void RegulatorPID::setMetodaCalkowania(MetodaCalkowania m)
 {
