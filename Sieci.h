@@ -77,6 +77,73 @@ struct ProbkaDanych
     }
 };
 
+struct ProbkaDanych
+{
+    quint64 numerSeq = 0;     // Numer sekwencyjny próbki
+    double czas;
+    double wartoscZadana;
+    double wyjscie;
+    double uchyb;
+    double sterowanie;
+
+    // Serializacja binarna (dla QDataStream)
+    friend QDataStream &operator<<(QDataStream &out, const ProbkaDanych &p)
+    {
+        out << p.numerSeq << p.czas << p.wartoscZadana << p.wyjscie << p.uchyb << p.sterowanie;
+        return out;
+    }
+
+    friend QDataStream &operator>>(QDataStream &in, ProbkaDanych &p)
+    {
+        in >> p.numerSeq >> p.czas >> p.wartoscZadana >> p.wyjscie >> p.uchyb >> p.sterowanie;
+        return in;
+    }
+
+    // Serializacja tekstowa (JSON)
+    QJsonObject toJson() const
+    {
+        QJsonObject obj;
+        obj["n"] = static_cast<qint64>(numerSeq);  // numer sekwencyjny
+        obj["czas"] = czas;
+        obj["w"] = wartoscZadana;
+        obj["y"] = wyjscie;
+        obj["e"] = uchyb;
+        obj["u"] = sterowanie;
+        return obj;
+    }
+
+    static ProbkaDanych fromJson(const QJsonObject &obj)
+    {
+        ProbkaDanych p;
+        p.numerSeq = obj["n"].toVariant().toULongLong();
+        p.czas = obj["czas"].toDouble();
+        p.wartoscZadana = obj["w"].toDouble();
+        p.wyjscie = obj["y"].toDouble();
+        p.uchyb = obj["e"].toDouble();
+        p.sterowanie = obj["u"].toDouble();
+        return p;
+    }
+
+    // Serializacja binarna jako QByteArray
+    QByteArray toBinary() const
+    {
+        QByteArray data;
+        QDataStream out(&data, QIODevice::WriteOnly);
+        out.setVersion(QDataStream::Qt_5_15);
+        out << *this;
+        return data;
+    }
+
+    static ProbkaDanych fromBinary(const QByteArray &data)
+    {
+        ProbkaDanych p;
+        QDataStream in(data);
+        in.setVersion(QDataStream::Qt_5_15);
+        in >> p;
+        return p;
+    }
+};
+
 class Sieci : public QObject
 {
         Q_OBJECT
