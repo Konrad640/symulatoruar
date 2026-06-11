@@ -1,7 +1,7 @@
 #include "ModelARX.h"
 #include "ProstyUAR.h"
 #include "RegulatorPID.h"
-#include "Generator.h" // <--- DODANO NAGŁÓWEK
+#include "Generator.h"
 #include <cmath>
 #include <iomanip>
 #include <iostream>

@@ -21,7 +21,7 @@ class Sieci : public QObject
                 PAKIET_PROBKA = 2
         };
 
-        enum SerializacjaProbek { SER_BINARNA, SER_TEKSTOWA };
+        enum Serializacja { SER_BINARNA, SER_TEKSTOWA };
 
     public:
         explicit Sieci(QObject *parent = nullptr);
@@ -34,8 +34,8 @@ class Sieci : public QObject
         Tryb get_tryb() const { return m_tryb; }
         bool czyPolaczony() const;
         QString opisPartnera() const;
-        void setSerializacjaProbek(SerializacjaProbek s) { m_serializacjaProbek = s; }
-        SerializacjaProbek getSerializacjaProbek() const { return m_serializacjaProbek; }
+        void setSerializacja(Serializacja s) { m_serializacja = s; }
+        Serializacja getSerializacja() const { return m_serializacja; }
 
     public slots:
         void wyslijKonfiguracje(const QJsonObject &konfig);
@@ -63,10 +63,12 @@ class Sieci : public QObject
         QTcpServer m_server;
         QTcpSocket *m_socket = nullptr;
         QByteArray m_bufor;
-        SerializacjaProbek m_serializacjaProbek = SER_BINARNA;
+        Serializacja m_serializacja = SER_BINARNA;
 
         void podlaczSocket();
+        void ustawOpcjeSocketu();
         void czyscPolaczenie();
+        void zakonczPolaczenie(const QString &opis);
         void parsujBufor();
         void wyslijPakiet(TypPakietu typ, const QByteArray &payload);
 };

@@ -26,8 +26,6 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(QWidget *parent = nullptr);
 
-    Sieci sieci;
-
 private slots:
     void onKrokWykonany(double czas, double w, double y, double e, double u);
 
@@ -48,6 +46,7 @@ private slots:
     void wlaczTrybRegulator();
     void wlaczTrybObiekt();
     void rozlaczSiec();
+    void onZmianaTaktowania();
     void onSieciPolaczono();
     void onSieciRozlaczono();
     void onSieciStatusZmieniony(const QString &opis);
@@ -58,37 +57,49 @@ private slots:
 private:
     enum class TaktowanieSieci { Jednostronne, Obustronne };
 
+    struct ProbkaSieciowa
+    {
+        double t = 0.0;
+        double dt = 0.0;
+        double w = 0.0;
+        double y = 0.0;
+        double e = 0.0;
+        double u = 0.0;
+        double P = 0.0;
+        double I = 0.0;
+        double D = 0.0;
+        double shadowY = 0.0;
+        double shadowU = 0.0;
+    };
+
     ModelARX arx;
     RegulatorPID pid;
     Generator gen;
     ProstyUAR petla;
+    Sieci sieci;
 
-    double oknoCzasowe;
-    bool   m_aplikujeZdalna;
-    QTimer *m_timerSieciowy;
-    double m_czasSieciowy;
-    double m_ostatnieYSieciowe;
-    double m_ostatnieUSieciowe;
-    double m_ostatnieWSieciowe;
-    double m_ostatnieESieciowe;
-    double m_ostatniePSieciowe;
-    double m_ostatnieISieciowe;
-    double m_ostatnieDSieciowe;
-    double m_ostatnieDtSieciowe;
-    double m_shadowYSieciowe;
-    double m_shadowUSieciowe;
-    int    m_numerProbkiSieciowej;
-    int    m_ostatniSeqSterowania;
-    int    m_ostatniSeqOdpowiedzi;
-    int    m_brakiSterowaniaPodRzad;
-    int    m_pakietyWyslaneOkno;
-    int    m_pakietyOdebraneOkno;
-    int    m_ostatniDesync;
-    bool   m_oczekujeNaOdpowiedz;
-    bool   m_maNoweSterowanie;
-    bool   m_rozlaczanieCelowe;
-    bool   m_byloPolaczenie;
-    int    m_ostatniIndeksTaktowaniaSieci;
+    double oknoCzasowe = 10.0;
+
+    QTimer *m_timerSieciowy = nullptr;
+    QTimer *m_timerWydajnosci = nullptr;
+    ProbkaSieciowa m_probkaSieci;
+    int  m_numerProbkiSieciowej = 0;
+    int  m_ostatniSeqSterowania = 0;
+    int  m_ostatniSeqOdpowiedzi = 0;
+    int  m_brakiSterowaniaPodRzad = 0;
+    int  m_taktyBezOdpowiedzi = 0;
+    int  m_ostatniDesync = 0;
+    bool m_symulacjaSieciowaTrwa = false;
+    bool m_oczekujeNaOdpowiedz = false;
+    bool m_maNoweSterowanie = false;
+
+    bool m_aplikujeZdalna = false;
+    bool m_rozlaczanieCelowe = false;
+    bool m_byloPolaczenie = false;
+    int  m_ostatniIndeksTaktowaniaSieci = 0;
+
+    int m_pakietyWyslaneOkno = 0;
+    int m_pakietyOdebraneOkno = 0;
     QElapsedTimer m_zegarWydajnosci;
 
     // GUI - Kontrolki
@@ -140,6 +151,7 @@ private:
 
     void konfigurujGUI();
     void konfigurujWykresy();
+    void wyczyscWykresy();
     void aktualizujDaneWykresow(double t, double w, double y, double e, double u);
     void aktualizujDaneWykresow(
         double t, double w, double y, double e, double u, double p, double i, double d);
@@ -149,9 +161,11 @@ private:
     void wyslijKonfiguracjeJesliPolaczony();
     void aktualizujStanKontrolek();
     void ustawWskaznikPolaczenia(bool polaczony);
+    void przelaczTrybSieciowy(Sieci::Tryb nowyTryb, const QString &pytanie);
     void zresetujStanSieciowy();
     void uruchomSymulacjeSieciowa();
     void zatrzymajSymulacjeSieciowa();
+    void oznaczStartTransmisji();
     bool czyTrybSieciowy() const;
     bool czySiecJednostronna() const;
     TaktowanieSieci aktualneTaktowanieSieci() const;
@@ -160,9 +174,9 @@ private:
     void obsluzSterowanieSieciowe(const QJsonObject &probka);
     void obsluzWyjscieSieciowe(const QJsonObject &probka);
     void obsluzKomendeSieciowa(const QJsonObject &probka);
+    QJsonObject probkaBazowaJson(const QString &rodzaj, int seq) const;
     void wyslijProbkeSieciowa(QJsonObject probka);
     void wyslijKomendeSieciowa(const QString &komenda);
-    void zarejestrujPakietOdebrany();
     void odswiezWydajnoscSieci();
     void ustawLampkeWydajnosci(bool ok, const QString &opis);
     void ustawStatusSynchronizacji(int desync, qint64 opoznienieMs);

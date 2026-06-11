@@ -42,7 +42,6 @@ private:
     MetodaCalkowania metoda;
 
     double suma_uchybow;
-    double calka_wewnetrzna;
 
     double poprzedni_uchyb;
     double ostatnie_P;

@@ -1,9 +1,24 @@
 #include "Sieci.h"
 
+#include <QCborValue>
 #include <QDataStream>
 
 namespace {
 const QString FORMAT_PROBKI = "UAR_PROBKA_BIN_1";
+
+QJsonObject deserializujKonfiguracje(const QByteArray &payload)
+{
+        QJsonDocument doc = QJsonDocument::fromJson(payload);
+        if (doc.isObject())
+                return doc.object();
+
+        QCborParserError blad;
+        const QCborValue wartosc = QCborValue::fromCbor(payload, &blad);
+        if (blad.error == QCborError::NoError && wartosc.isMap())
+                return wartosc.toJsonValue().toObject();
+
+        return QJsonObject();
+}
 
 double pobierzDouble(const QJsonObject &obj, const QString &klucz)
 {
@@ -167,10 +182,7 @@ void Sieci::set_tryb(Tryb tryb)
 
 void Sieci::rozlacz()
 {
-        czyscPolaczenie();
-        m_tryb = Nieokreslony;
-        emit statusZmieniony("Rozłączony");
-        emit rozlaczono();
+        zakonczPolaczenie("Rozłączony");
 }
 
 void Sieci::onNewConnection()
@@ -187,6 +199,7 @@ void Sieci::onNewConnection()
 
         m_socket = nowy;
         podlaczSocket();
+        ustawOpcjeSocketu();
 
         qDebug() << "Sieci: podłączył się obiekt";
         emit statusZmieniony("Regulator: połączono z obiektem");
@@ -207,8 +220,18 @@ void Sieci::podlaczSocket()
                 &Sieci::onError);
 }
 
+void Sieci::ustawOpcjeSocketu()
+{
+        if (!m_socket)
+                return;
+
+        m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+        m_socket->setSocketOption(QAbstractSocket::KeepAliveOption, 1);
+}
+
 void Sieci::onConnected()
 {
+        ustawOpcjeSocketu();
         qDebug() << "Sieci: połączono z regulatorem";
         emit statusZmieniony("Obiekt: połączono z regulatorem");
         emit polaczono();
@@ -217,26 +240,23 @@ void Sieci::onConnected()
 void Sieci::onDisconnected()
 {
         qDebug() << "Sieci: rozłączono";
-        m_tryb = Nieokreslony;
-        if (m_server.isListening()) {
-                m_server.close();
-        }
-        emit statusZmieniony("Rozłączono");
-        emit rozlaczono();
-
-        if (m_socket) {
-                m_socket->deleteLater();
-                m_socket = nullptr;
-        }
-        m_bufor.clear();
+        zakonczPolaczenie("Rozłączono");
 }
 
 void Sieci::onError(QAbstractSocket::SocketError)
 {
-        if (m_socket) {
-                qDebug() << "Sieci: błąd -" << m_socket->errorString();
-                emit statusZmieniony(QString("Błąd sieci: %1").arg(m_socket->errorString()));
-        }
+        const QString opis = m_socket ? m_socket->errorString() : QString("nieznany błąd");
+        qDebug() << "Sieci: błąd -" << opis;
+
+        zakonczPolaczenie(QString("Błąd sieci: %1").arg(opis));
+}
+
+void Sieci::zakonczPolaczenie(const QString &opis)
+{
+        czyscPolaczenie();
+        m_tryb = Nieokreslony;
+        emit statusZmieniony(opis);
+        emit rozlaczono();
 }
 
 void Sieci::czyscPolaczenie()
@@ -258,8 +278,12 @@ void Sieci::wyslijKonfiguracje(const QJsonObject &konfig)
         if (!czyPolaczony())
                 return;
 
-        QJsonDocument doc(konfig);
-        wyslijPakiet(PAKIET_KONFIG, doc.toJson(QJsonDocument::Compact));
+        if (m_serializacja == SER_BINARNA) {
+                wyslijPakiet(PAKIET_KONFIG, QCborValue::fromJsonValue(konfig).toCbor());
+        } else {
+                QJsonDocument doc(konfig);
+                wyslijPakiet(PAKIET_KONFIG, doc.toJson(QJsonDocument::Compact));
+        }
 }
 
 void Sieci::wyslijProbke(const QJsonObject &probka)
@@ -267,7 +291,7 @@ void Sieci::wyslijProbke(const QJsonObject &probka)
         if (!czyPolaczony())
                 return;
 
-        if (m_serializacjaProbek == SER_BINARNA) {
+        if (m_serializacja == SER_BINARNA) {
                 wyslijPakiet(PAKIET_PROBKA, serializujProbkeBinarnie(probka));
         } else {
                 QJsonDocument doc(probka);
@@ -321,10 +345,10 @@ void Sieci::parsujBufor()
                 m_bufor.remove(0, ROZMIAR_NAGLOWKA + rozmiar);
 
                 if (typ == PAKIET_KONFIG) {
-                        QJsonDocument doc = QJsonDocument::fromJson(payload);
-                        if (doc.isObject()) {
+                        QJsonObject konfig = deserializujKonfiguracje(payload);
+                        if (!konfig.isEmpty()) {
                                 qDebug() << "Sieci: odebrano konfigurację";
-                                emit odebranoKonfiguracje(doc.object());
+                                emit odebranoKonfiguracje(konfig);
                         }
                 } else if (typ == PAKIET_PROBKA) {
                         QJsonObject probka = deserializujProbkeBinarnie(payload);

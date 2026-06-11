@@ -12,7 +12,6 @@ RegulatorPID::RegulatorPID(double k, double ti, double td)
 void RegulatorPID::zresetuj()
 {
     suma_uchybow = 0.0;
-    calka_wewnetrzna = 0.0;
     poprzedni_uchyb = 0.0;
     ostatnie_P = 0.0;
     ostatnie_I = 0.0;
@@ -20,7 +19,6 @@ void RegulatorPID::zresetuj()
 }
 void RegulatorPID::zresetujCalke() {
     suma_uchybow = 0.0;
-    calka_wewnetrzna = 0.0;
     ostatnie_I=0.0;
 }
 
@@ -31,14 +29,11 @@ void RegulatorPID::setMetodaCalkowania(MetodaCalkowania m)
 
     if (m == MetodaCalkowania::STALA_W_SUMIE) {
         if (Ti != 0)
-            calka_wewnetrzna = suma_uchybow * (1.0 / Ti);
-        else
-            calka_wewnetrzna = 0.0;
-    } else {
-        if (Ti != 0)
-            suma_uchybow = calka_wewnetrzna * Ti;
+            suma_uchybow /= Ti;
         else
             suma_uchybow = 0.0;
+    } else {
+        suma_uchybow *= Ti;
     }
     metoda = m;
 }
@@ -105,15 +100,8 @@ double RegulatorPID::getTd() const
 }
 
 void RegulatorPID::setLiczCalk(LiczCalk m){
-        if(metoda == MetodaCalkowania::STALA_PRZED_SUMA && m == LiczCalk::Wew)
-                suma_uchybow /= Ti;
-        if(metoda == MetodaCalkowania::STALA_W_SUMIE && m == LiczCalk::Zew)
-                suma_uchybow *= Ti;
-
-        if (m == LiczCalk::Wew)
-                setMetodaCalkowania(MetodaCalkowania::STALA_W_SUMIE);
-        else
-                setMetodaCalkowania(MetodaCalkowania::STALA_PRZED_SUMA);
+        setMetodaCalkowania(m == LiczCalk::Wew ? MetodaCalkowania::STALA_W_SUMIE
+                                               : MetodaCalkowania::STALA_PRZED_SUMA);
 }
 
 void RegulatorPID::setStalaCalk(double ti)
