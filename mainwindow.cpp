@@ -208,7 +208,11 @@ void MainWindow::konfigurujGUI()
     spinInterwal->setRange(10, 1000);
     spinInterwal->setValue(200);
     spinInterwal->setSuffix(" ms");
-    connect(spinInterwal, &QSpinBox::editingFinished, this, &MainWindow::aktualizujInterwal);
+
+    // Zmienione z editingFinished na valueChanged
+    connect(spinInterwal, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) {
+        aktualizujInterwal();
+    });
 
     btnStartStop = new QPushButton("Start");
     connect(btnStartStop, &QPushButton::clicked, this, &MainWindow::przelaczSymulacje);
@@ -472,44 +476,55 @@ void MainWindow::aktualizujDaneWykresow(double t, double w, double y, double e, 
 void MainWindow::aktualizujDaneWykresow(
     double t, double w, double y, double e, double u, double p, double i, double d)
 {
-    seriaZadana->append(t, w);
-    seriaWyjscie->append(t, y);
-    seriaUchyb->append(t, e);
-    seriaSterowanie->append(t, u);
-    seriaP->append(t, p);
-    seriaI->append(t, i);
-    seriaD->append(t, d);
+    double minCzasWidoczny = (t > oknoCzasowe) ? t - oknoCzasowe : 0.0;
+    double progUsuwania    = minCzasWidoczny - 1.0;
+
+    auto dodajIUsunStare = [progUsuwania](QLineSeries *s, double nx, double ny) {
+        QVector<QPointF> punkty = s->pointsVector();
+        punkty.append(QPointF(nx, ny));
+
+        int doUsuniecia = 0;
+        while (doUsuniecia < punkty.size() - 1 && punkty[doUsuniecia].x() < progUsuwania) {
+            doUsuniecia++;
+        }
+
+        if (doUsuniecia > 0) {
+            punkty.remove(0, doUsuniecia);
+        }
+        s->replace(punkty);
+    };
+
+    dodajIUsunStare(seriaZadana, t, w);
+    dodajIUsunStare(seriaWyjscie, t, y);
+    dodajIUsunStare(seriaUchyb, t, e);
+    dodajIUsunStare(seriaSterowanie, t, u);
+    dodajIUsunStare(seriaP, t, p);
+    dodajIUsunStare(seriaI, t, i);
+    dodajIUsunStare(seriaD, t, d);
 
     auto przesunOs = [&](QValueAxis *ax) {
-        ax->setRange(t > oknoCzasowe ? t - oknoCzasowe : 0, t > oknoCzasowe ? t : oknoCzasowe);
+        ax->setRange(minCzasWidoczny, t > oknoCzasowe ? t : oknoCzasowe);
         ax->setTickCount(11);
     };
     przesunOs(osXGlowny); przesunOs(osXUchyb); przesunOs(osXSterowanie); przesunOs(osXPID);
 
-    double minCzasWidoczny = (t > oknoCzasowe) ? t - oknoCzasowe : 0.0;
-    double progUsuwania    = minCzasWidoczny - 1.0;
-    auto usunStarePunkty = [progUsuwania](QLineSeries *s) {
-        while (s->count() > 1 && s->at(0).x() < progUsuwania) s->remove(0);
-    };
-    usunStarePunkty(seriaZadana); usunStarePunkty(seriaWyjscie); usunStarePunkty(seriaUchyb);
-    usunStarePunkty(seriaSterowanie); usunStarePunkty(seriaP); usunStarePunkty(seriaI); usunStarePunkty(seriaD);
-
     auto autoScale = [&](const QList<QLineSeries *> &serie, QValueAxis *ay) {
         double minV = 1e9, maxV = -1e9; bool znaleziono = false;
         for (auto s : serie) {
-            const QList<QPointF> punkty = s->points();
-            for (int i = punkty.size() - 1; i >= 0; --i) {
-                const QPointF &p = punkty[i];
-                if (p.x() < minCzasWidoczny) break;
-                if (p.y() < minV) minV = p.y();
-                if (p.y() > maxV) maxV = p.y();
+            const QVector<QPointF> punkty = s->pointsVector();
+            for (int idx = punkty.size() - 1; idx >= 0; --idx) {
+                const QPointF &pt = punkty[idx];
+                if (pt.x() < minCzasWidoczny) break;
+                if (pt.y() < minV) minV = pt.y();
+                if (pt.y() > maxV) maxV = pt.y();
                 znaleziono = true;
             }
         }
         if (!znaleziono) { minV = -1.0; maxV = 1.0; }
         else if (std::abs(maxV - minV) < 1e-9) { maxV = minV + 0.1; minV = minV - 0.1; }
         double m = (maxV - minV) * 0.125;
-        ay->setRange(minV - m, maxV + m); ay->setTickCount(11);
+        ay->setRange(minV - m, maxV + m);
+        ay->setTickCount(11);
     };
 
     autoScale({seriaZadana, seriaWyjscie}, osYGlowny);
@@ -517,7 +532,6 @@ void MainWindow::aktualizujDaneWykresow(
     autoScale({seriaSterowanie}, osYSterowanie);
     autoScale({seriaP, seriaI, seriaD}, osYPID);
 }
-
 // ---- JSON ----
 
 QJsonObject MainWindow::zbudujKonfiguracjeJson() const
@@ -944,21 +958,26 @@ void MainWindow::wykonajKrokRegulatoraSieciowego()
     if (!sieci.czyPolaczony())
         return;
 
-    if (czySiecJednostronna() && m_oczekujeNaOdpowiedz) {
+    // Sprawdzamy, czy wchodzimy w takt nie doczekawszy się odpowiedzi z poprzedniego
+    const bool brakOdpowiedzi = (czySiecJednostronna() && m_oczekujeNaOdpowiedz);
+
+    if (brakOdpowiedzi) {
         ++m_taktyBezOdpowiedzi;
         if (m_taktyBezOdpowiedzi < MAKS_TAKTY_BEZ_ODPOWIEDZI) {
-            ustawLampkeWydajnosci(false, "Odpowiedz obiektu nie nadeszla przed kolejnym taktem");
-            return;
+            ustawLampkeWydajnosci(false, "Brak odpowiedzi - trzymam poprzednie y (ZOH)");
+        } else {
+            m_oczekujeNaOdpowiedz = false;
+            m_taktyBezOdpowiedzi = 0;
         }
-        m_oczekujeNaOdpowiedz = false;
-        m_taktyBezOdpowiedzi = 0;
     }
 
     const double dt = spinInterwal->value() / 1000.0;
     m_probkaSieci.dt = dt;
-    m_probkaSieci.t += dt;
+    m_probkaSieci.t += dt; // Posuwamy czas do przodu
     ++m_numerProbkiSieciowej;
 
+    // UWAGA: Jeśli brakOdpowiedzi == true, m_probkaSieci.y ma STARY stan (zostało zapamiętane).
+    // Regulator wylicza teraz nowy uchyb i sterowanie na podstawie tego zamrożonego 'y'.
     const double w = gen.generuj(m_probkaSieci.t);
     const double e = w - m_probkaSieci.y;
     const double u = pid.symuluj(e, dt);
@@ -979,9 +998,21 @@ void MainWindow::wykonajKrokRegulatoraSieciowego()
     wyslijProbkeSieciowa(probka);
     m_oczekujeNaOdpowiedz = czySiecJednostronna();
 
-    lblSterowanieSieci->setText(QString("Sterowanie: wyslano seq %1, u=%2")
-                                    .arg(m_numerProbkiSieciowej)
-                                    .arg(u, 0, 'f', 3));
+    // ---- WYMUSZENIE RYSOWANIA ----
+    if (brakOdpowiedzi) {
+        // Skoro obiekt nie przysłał paczki, `obsluzWyjscieSieciowe` nie zaktualizuje wykresu.
+        // Robimy to ręcznie, rysując stary 'y' na nowym czasie 't' (powstanie płaska linia awarii).
+        aktualizujDaneWykresow(m_probkaSieci.t, w, m_probkaSieci.y, e, u,
+                               m_probkaSieci.P, m_probkaSieci.I, m_probkaSieci.D);
+
+        lblSterowanieSieci->setText(QString("Sterowanie: seq %1, trzymam y=%2 (ZOH)")
+                                        .arg(m_numerProbkiSieciowej)
+                                        .arg(m_probkaSieci.y, 0, 'f', 3));
+    } else {
+        lblSterowanieSieci->setText(QString("Sterowanie: wyslano seq %1, u=%2")
+                                        .arg(m_numerProbkiSieciowej)
+                                        .arg(u, 0, 'f', 3));
+    }
 }
 
 void MainWindow::obsluzSterowanieSieciowe(const QJsonObject &probka)
@@ -1066,7 +1097,7 @@ void MainWindow::obsluzWyjscieSieciowe(const QJsonObject &probka)
     }
 
     m_ostatniSeqOdpowiedzi = seq;
-    m_probkaSieci.y = probka["y"].toDouble();
+    m_probkaSieci.y = probka["y"].toDouble(); // Zawsze aktualizujemy y do najświeższej wartości
     m_oczekujeNaOdpowiedz = false;
     m_taktyBezOdpowiedzi = 0;
 
@@ -1075,14 +1106,19 @@ void MainWindow::obsluzWyjscieSieciowe(const QJsonObject &probka)
     const int desync = m_numerProbkiSieciowej - seq;
     ustawStatusSynchronizacji(desync, opoznienieMs);
 
-    aktualizujDaneWykresow(probka["t"].toDouble(),
-                           probka["w"].toDouble(),
-                           m_probkaSieci.y,
-                           probka["e"].toDouble(),
-                           probka["u"].toDouble(),
-                           probka["P"].toDouble(),
-                           probka["I"].toDouble(),
-                           probka["D"].toDouble());
+    // Ochrona przed cofaniem się w czasie na wykresie:
+    // Rysujemy tylko wtedy, gdy pakiet nie pochodzi z przeszłości
+    // względem awaryjnych kroków (ZOH), które regulator zdążył już wykonać.
+    if (probka["t"].toDouble() >= m_probkaSieci.t) {
+        aktualizujDaneWykresow(probka["t"].toDouble(),
+                               probka["w"].toDouble(),
+                               m_probkaSieci.y,
+                               probka["e"].toDouble(),
+                               probka["u"].toDouble(),
+                               probka["P"].toDouble(),
+                               probka["I"].toDouble(),
+                               probka["D"].toDouble());
+    }
 
     const QString brakU = probka["brak_nowego_u"].toBool() ? ", obiekt trzymal poprzednie u" : "";
     lblSterowanieSieci->setText(QString("Sterowanie: odpowiedz seq %1%2").arg(seq).arg(brakU));
