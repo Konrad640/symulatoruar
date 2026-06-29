@@ -998,10 +998,8 @@ void MainWindow::wykonajKrokRegulatoraSieciowego()
     wyslijProbkeSieciowa(probka);
     m_oczekujeNaOdpowiedz = czySiecJednostronna();
 
-    // ---- WYMUSZENIE RYSOWANIA ----
     if (brakOdpowiedzi) {
-        // Skoro obiekt nie przysłał paczki, `obsluzWyjscieSieciowe` nie zaktualizuje wykresu.
-        // Robimy to ręcznie, rysując stary 'y' na nowym czasie 't' (powstanie płaska linia awarii).
+
         aktualizujDaneWykresow(m_probkaSieci.t, w, m_probkaSieci.y, e, u,
                                m_probkaSieci.P, m_probkaSieci.I, m_probkaSieci.D);
 
