@@ -10,7 +10,6 @@ SOURCES += \
     Generator.cpp \
     KonfiguracjaARX.cpp \
     ModelARX.cpp \
-    Petla_Sprzezenia.cpp \
     ProstyUAR.cpp \
     RegulatorPID.cpp \
     Sieci.cpp \
@@ -23,7 +22,6 @@ HEADERS += \
     Generator.h \
     KonfiguracjaARX.h \
     ModelARX.h \
-    Petla_Sprzezenia.h \
     ProstyUAR.h \
     RegulatorPID.h \
     Sieci.h \

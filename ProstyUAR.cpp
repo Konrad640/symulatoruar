@@ -23,7 +23,7 @@ void ProstyUAR::onTimeout()
     double w = generator.generuj(m_aktualnyCzas);
 
     // Obliczenie obiektu i regulatora
-    double y = symuluj(w, dt);
+    double y = symuluj(w);
 
     // Uchyb
     double e = w - y;
@@ -36,17 +36,16 @@ void ProstyUAR::onTimeout()
     emit krokWykonany(m_aktualnyCzas, w, y, e, u);
 }
 
-double ProstyUAR::symuluj(double wartosc_zadana, double dt)
-{
-    // Obliczanie uchybu
-    double e = wartosc_zadana - m_ostatnieWyjscie;
+double ProstyUAR::symuluj(double wartosc_zadana) {
+        // Obliczanie uchybu
+        double e = wartosc_zadana - m_ostatnieWyjscie;
 
-    // Obliczanie sterowanie z regulatora
-    double u = regulator.symuluj(e, dt);
-    double y = model.symuluj(u);
-    m_ostatnieWyjscie = y;
+        // Obliczanie sterowanie z regulatora
+        double u = regulator.symuluj(e);
+        double y = model.symuluj(u);
+        m_ostatnieWyjscie = y;
 
-    return y;
+        return y;
 }
 
 void ProstyUAR::start()

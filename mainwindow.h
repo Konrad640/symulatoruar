@@ -57,19 +57,17 @@ private slots:
 private:
     enum class TaktowanieSieci { Jednostronne, Obustronne };
 
-    struct ProbkaSieciowa
-    {
-        double t = 0.0;
-        double dt = 0.0;
-        double w = 0.0;
-        double y = 0.0;
-        double e = 0.0;
-        double u = 0.0;
-        double P = 0.0;
-        double I = 0.0;
-        double D = 0.0;
-        double shadowY = 0.0;
-        double shadowU = 0.0;
+    struct ProbkaSieciowa {
+            double t = 0.0;
+            double w = 0.0;
+            double y = 0.0;
+            double e = 0.0;
+            double u = 0.0;
+            double P = 0.0;
+            double I = 0.0;
+            double D = 0.0;
+            double shadowY = 0.0;
+            double shadowU = 0.0;
     };
 
     ModelARX arx;

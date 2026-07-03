@@ -21,7 +21,7 @@ public:
     void ustawStan(double aktualnyCzas, double ostatnieWyjscie);
     int getInterwal() const { return m_interwalMs; }
 
-    double symuluj(double wartosc_zadana, double dt = 1.0);
+    double symuluj(double wartosc_zadana);
 
 signals:
     void krokWykonany(double t, double w, double y, double e, double u);

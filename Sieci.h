@@ -5,29 +5,24 @@
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QObject>
 #include <QTcpServer>
 #include <QTcpSocket>
-#include <QObject>
 
-class Sieci : public QObject
-{
+class Sieci : public QObject {
         Q_OBJECT
-    public:
-
+       public:
         enum Tryb { Nieokreslony, Regulator, Obiekt };
 
-        enum TypPakietu : quint8 {
-                PAKIET_KONFIG = 1,
-                PAKIET_PROBKA = 2
-        };
+        enum TypPakietu : quint8 { PAKIET_KONFIG = 1, PAKIET_PROBKA = 2 };
 
         enum Serializacja { SER_BINARNA, SER_TEKSTOWA };
 
-    public:
-        explicit Sieci(QObject *parent = nullptr);
+       public:
+        explicit Sieci(QObject* parent = nullptr);
         ~Sieci() override;
 
-        void ustawParametry(quint16 port = 45763, const QString &host = "127.0.0.1");
+        void ustawParametry(quint16 port = 45763, const QString& host = "127.0.0.1");
         void set_tryb(Tryb tryb);
         void rozlacz();
 
@@ -37,40 +32,40 @@ class Sieci : public QObject
         void setSerializacja(Serializacja s) { m_serializacja = s; }
         Serializacja getSerializacja() const { return m_serializacja; }
 
-    public slots:
-        void wyslijKonfiguracje(const QJsonObject &konfig);
-        void wyslijProbke(const QJsonObject &probka);
+       public slots:
+        void wyslijKonfiguracje(const QJsonObject& konfig);
+        void wyslijProbke(const QJsonObject& probka);
 
-    signals:
+       signals:
         void polaczono();
         void rozlaczono();
-        void statusZmieniony(const QString &opis);
-        void odebranoKonfiguracje(const QJsonObject &konfig);
-        void odebranoProbke(const QJsonObject &probka);
+        void statusZmieniony(const QString& opis);
+        void odebranoKonfiguracje(const QJsonObject& konfig);
+        void odebranoProbke(const QJsonObject& probka);
 
-    private slots:
+       private slots:
         void onNewConnection();
         void onConnected();
         void onDisconnected();
         void onReadyRead();
         void onError(QAbstractSocket::SocketError blad);
 
-    private:
+       private:
         Tryb m_tryb = Nieokreslony;
         quint16 m_port = 45763;
         QString m_host = "127.0.0.1";
 
         QTcpServer m_server;
-        QTcpSocket *m_socket = nullptr;
+        QTcpSocket* m_socket = nullptr;
         QByteArray m_bufor;
         Serializacja m_serializacja = SER_BINARNA;
 
         void podlaczSocket();
         void ustawOpcjeSocketu();
         void czyscPolaczenie();
-        void zakonczPolaczenie(const QString &opis);
+        void zakonczPolaczenie(const QString& opis);
         void parsujBufor();
-        void wyslijPakiet(TypPakietu typ, const QByteArray &payload);
+        void wyslijPakiet(TypPakietu typ, const QByteArray& payload);
 };
 
-#endif // SIECI_H
+#endif  // SIECI_H

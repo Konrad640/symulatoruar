@@ -1,49 +1,41 @@
 #include "RegulatorPID.h"
 
-RegulatorPID::RegulatorPID(double k, double ti, double td)
-    : Kp(k)
-    , Ti(ti)
-    , Td(td)
-    , metoda(MetodaCalkowania::STALA_W_SUMIE)
-{
-    zresetuj();
+RegulatorPID::RegulatorPID(double k, double ti, double td) : Kp(k), Ti(ti), Td(td), metoda(MetodaCalkowania::STALA_W_SUMIE) {
+        zresetuj();
 }
 
-void RegulatorPID::zresetuj()
-{
-    suma_uchybow = 0.0;
-    poprzedni_uchyb = 0.0;
-    ostatnie_P = 0.0;
-    ostatnie_I = 0.0;
-    ostatnie_D = 0.0;
+void RegulatorPID::zresetuj() {
+        suma_uchybow = 0.0;
+        poprzedni_uchyb = 0.0;
+        ostatnie_P = 0.0;
+        ostatnie_I = 0.0;
+        ostatnie_D = 0.0;
 }
 void RegulatorPID::zresetujCalke() {
-    suma_uchybow = 0.0;
-    ostatnie_I=0.0;
+        suma_uchybow = 0.0;
+        ostatnie_I = 0.0;
 }
 
-void RegulatorPID::setMetodaCalkowania(MetodaCalkowania m)
-{
-    if (m == metoda)
-        return;
+void RegulatorPID::setMetodaCalkowania(MetodaCalkowania m) {
+        if (m == metoda)
+                return;
 
-    if (m == MetodaCalkowania::STALA_W_SUMIE) {
-        if (Ti != 0)
-            suma_uchybow /= Ti;
-        else
-            suma_uchybow = 0.0;
-    } else {
-        suma_uchybow *= Ti;
-    }
-    metoda = m;
+        if (m == MetodaCalkowania::STALA_W_SUMIE) {
+                if (Ti != 0)
+                        suma_uchybow /= Ti;
+                else
+                        suma_uchybow = 0.0;
+        } else
+                suma_uchybow *= Ti;
+
+        metoda = m;
 }
 
-RegulatorPID::MetodaCalkowania RegulatorPID::getMetodaCalkowania() const
-{
-    return metoda;
+RegulatorPID::MetodaCalkowania RegulatorPID::getMetodaCalkowania() const {
+        return metoda;
 }
 
-double RegulatorPID::symuluj(double e, double dt) {
+double RegulatorPID::symuluj(double e) {
         // P
         double P = Kp * e;
         ostatnie_P = P;
@@ -64,7 +56,7 @@ double RegulatorPID::symuluj(double e, double dt) {
         ostatnie_I = I;
 
         // D
-        double D =Td * (e - poprzedni_uchyb);
+        double D = Td * (e - poprzedni_uchyb);
         ostatnie_D = D;
 
         poprzedni_uchyb = e;
@@ -72,46 +64,14 @@ double RegulatorPID::symuluj(double e, double dt) {
         return P + I + D;
 }
 
-void RegulatorPID::setKp(double k)
-{
-    Kp = k;
-}
-double RegulatorPID::getKp() const
-{
-    return Kp;
+void RegulatorPID::setKp(double k) {
+        Kp = k;
 }
 
-void RegulatorPID::setTi(double ti)
-{
-    Ti = ti;
-}
-double RegulatorPID::getTi() const
-{
-    return Ti;
+void RegulatorPID::setTi(double ti) {
+        Ti = ti;
 }
 
-void RegulatorPID::setTd(double td)
-{
-    Td = td;
-}
-double RegulatorPID::getTd() const
-{
-    return Td;
-}
-
-void RegulatorPID::setLiczCalk(LiczCalk m){
-        setMetodaCalkowania(m == LiczCalk::Wew ? MetodaCalkowania::STALA_W_SUMIE
-                                               : MetodaCalkowania::STALA_PRZED_SUMA);
-}
-
-void RegulatorPID::setStalaCalk(double ti)
-{
-    setTi(ti);
-}
-
-double RegulatorPID::symuluj(double e)
-{
-    // Testy zakładają symulację krok po kroku bez podawania czasu,
-    // przyjmujemy dt = 1.0
-    return symuluj(e, 1.0);
+void RegulatorPID::setTd(double td) {
+        Td = td;
 }

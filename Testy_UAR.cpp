@@ -290,19 +290,17 @@ void TESTY_RegulatorPID::test_PI_skokJednostkowy_3()
     std::cerr << "RegPI (zmiana parametrow) -> test skoku jednostkowego nr 3: ";
     try {
         RegulatorPID it(0.5, 10.0);
-        std::vector<double> spodz = {0,   0.6, 0.7, 0.8, 0.9,  1,    1.1,  1.2,  1.3,  1.4,
-                                     1.5, 1.6, 1.8, 2,   2.2,  2.4,  2.6,  2.8,  3,    3.2,
-                                     3.4, 3.6, 3.8, 4,   2.35, 2.45, 2.55, 2.65, 2.75, 2.85};
+        std::vector<double> spodz = {0, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.2, 2.4, 2.6, 2.8, 3, 3.2, 3.4, 3.6, 3.8, 4, 2.35, 2.45, 2.55, 2.65, 2.75, 2.85};
         std::vector<double> fakt(30);
         for (int i = 0; i < 30; i++) {
             if (i == 6)
-                it.setLiczCalk(RegulatorPID::LiczCalk::Wew);
+                    it.setMetodaCalkowania(RegulatorPID::MetodaCalkowania::STALA_W_SUMIE);
             if (i == 12)
-                it.setStalaCalk(5.0);
+                    it.setTi(5.0);
             if (i == 18)
-                it.setLiczCalk(RegulatorPID::LiczCalk::Zew);
+                    it.setMetodaCalkowania(RegulatorPID::MetodaCalkowania::STALA_PRZED_SUMA);
             if (i == 24)
-                it.setStalaCalk(10.0);
+                    it.setTi(10.0);
             fakt[i] = it.symuluj(!!i);
         }
         myAssert(spodz, fakt);

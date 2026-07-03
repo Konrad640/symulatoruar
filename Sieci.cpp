@@ -1,13 +1,10 @@
 #include "Sieci.h"
-
 #include <QCborValue>
 #include <QDataStream>
 
-namespace {
 const QString FORMAT_PROBKI = "UAR_PROBKA_BIN_1";
 
-QJsonObject deserializujKonfiguracje(const QByteArray &payload)
-{
+QJsonObject deserializujKonfiguracje(const QByteArray& payload) {
         QJsonDocument doc = QJsonDocument::fromJson(payload);
         if (doc.isObject())
                 return doc.object();
@@ -20,23 +17,19 @@ QJsonObject deserializujKonfiguracje(const QByteArray &payload)
         return QJsonObject();
 }
 
-double pobierzDouble(const QJsonObject &obj, const QString &klucz)
-{
+double pobierzDouble(const QJsonObject& obj, const QString& klucz) {
         return obj.value(klucz).toDouble();
 }
 
-int pobierzInt(const QJsonObject &obj, const QString &klucz)
-{
+int pobierzInt(const QJsonObject& obj, const QString& klucz) {
         return obj.value(klucz).toInt();
 }
 
-qint64 pobierzInt64(const QJsonObject &obj, const QString &klucz)
-{
+qint64 pobierzInt64(const QJsonObject& obj, const QString& klucz) {
         return obj.value(klucz).toVariant().toLongLong();
 }
 
-QByteArray serializujProbkeBinarnie(const QJsonObject &probka)
-{
+QByteArray serializujProbkeBinarnie(const QJsonObject& probka) {
         QByteArray payload;
         QDataStream out(&payload, QIODevice::WriteOnly);
         out.setVersion(QDataStream::Qt_5_15);
@@ -46,7 +39,6 @@ QByteArray serializujProbkeBinarnie(const QJsonObject &probka)
         out << probka.value("komenda").toString();
         out << static_cast<qint32>(pobierzInt(probka, "seq"));
         out << pobierzDouble(probka, "t");
-        out << pobierzDouble(probka, "dt");
         out << pobierzDouble(probka, "w");
         out << pobierzDouble(probka, "y");
         out << pobierzDouble(probka, "y_poprzednie");
@@ -64,8 +56,7 @@ QByteArray serializujProbkeBinarnie(const QJsonObject &probka)
         return payload;
 }
 
-QJsonObject deserializujProbkeBinarnie(const QByteArray &payload)
-{
+QJsonObject deserializujProbkeBinarnie(const QByteArray& payload) {
         QJsonObject probka;
         QDataStream in(payload);
         in.setVersion(QDataStream::Qt_5_15);
@@ -78,7 +69,6 @@ QJsonObject deserializujProbkeBinarnie(const QByteArray &payload)
         qint64 nadanoMs = 0;
         bool brakNowegoU = false;
         double t = 0.0;
-        double dt = 0.0;
         double w = 0.0;
         double y = 0.0;
         double yPoprzednie = 0.0;
@@ -94,8 +84,7 @@ QJsonObject deserializujProbkeBinarnie(const QByteArray &payload)
         if (format != FORMAT_PROBKI || in.status() != QDataStream::Ok)
                 return probka;
 
-        in >> rodzaj >> komenda >> seq >> t >> dt >> w >> y >> yPoprzednie >> e >> u >> p >> i
-           >> d >> shadowY >> shadowU >> taktowanie >> nadanoMs >> brakNowegoU;
+        in >> rodzaj >> komenda >> seq >> t >> w >> y >> yPoprzednie >> e >> u >> p >> i >> d >> shadowY >> shadowU >> taktowanie >> nadanoMs >> brakNowegoU;
 
         if (in.status() != QDataStream::Ok)
                 return QJsonObject();
@@ -104,7 +93,6 @@ QJsonObject deserializujProbkeBinarnie(const QByteArray &payload)
         probka["komenda"] = komenda;
         probka["seq"] = seq;
         probka["t"] = t;
-        probka["dt"] = dt;
         probka["w"] = w;
         probka["y"] = y;
         probka["y_poprzednie"] = yPoprzednie;
@@ -121,40 +109,32 @@ QJsonObject deserializujProbkeBinarnie(const QByteArray &payload)
 
         return probka;
 }
-}
 
-Sieci::Sieci(QObject *parent)
-    : QObject(parent)
-{
+Sieci::Sieci(QObject* parent) : QObject(parent) {
         connect(&m_server, &QTcpServer::newConnection, this, &Sieci::onNewConnection);
 }
 
-Sieci::~Sieci()
-{
+Sieci::~Sieci() {
         czyscPolaczenie();
 }
 
-void Sieci::ustawParametry(quint16 port, const QString &host)
-{
+void Sieci::ustawParametry(quint16 port, const QString& host) {
         m_port = port;
         m_host = host;
 }
 
-bool Sieci::czyPolaczony() const
-{
+bool Sieci::czyPolaczony() const {
         return m_socket && m_socket->state() == QAbstractSocket::ConnectedState;
 }
 
-QString Sieci::opisPartnera() const
-{
+QString Sieci::opisPartnera() const {
         if (!czyPolaczony())
                 return "brak";
 
         return QString("%1:%2").arg(m_socket->peerAddress().toString()).arg(m_socket->peerPort());
 }
 
-void Sieci::set_tryb(Tryb tryb)
-{
+void Sieci::set_tryb(Tryb tryb) {
         czyscPolaczenie();
         m_tryb = tryb;
 
@@ -167,27 +147,23 @@ void Sieci::set_tryb(Tryb tryb)
                 }
                 qDebug() << "Sieci: tryb REGULATOR, nasłuchiwanie na porcie" << m_port;
                 emit statusZmieniony(QString("Regulator: nasłuchiwanie na porcie %1…").arg(m_port));
-        }
-        else if (m_tryb == Obiekt) {
+        } else if (m_tryb == Obiekt) {
                 m_socket = new QTcpSocket(this);
                 podlaczSocket();
                 qDebug() << "Sieci: tryb OBIEKT, łączenie z" << m_host << ":" << m_port;
                 emit statusZmieniony(QString("Obiekt: łączenie z %1:%2…").arg(m_host).arg(m_port));
                 m_socket->connectToHost(m_host, m_port);
-        }
-        else {
+        } else {
                 emit statusZmieniony("Rozłączony");
         }
 }
 
-void Sieci::rozlacz()
-{
+void Sieci::rozlacz() {
         zakonczPolaczenie("Rozłączony");
 }
 
-void Sieci::onNewConnection()
-{
-        QTcpSocket *nowy = m_server.nextPendingConnection();
+void Sieci::onNewConnection() {
+        QTcpSocket* nowy = m_server.nextPendingConnection();
         if (!nowy)
                 return;
 
@@ -206,22 +182,17 @@ void Sieci::onNewConnection()
         emit polaczono();
 }
 
-void Sieci::podlaczSocket()
-{
+void Sieci::podlaczSocket() {
         if (!m_socket)
                 return;
 
         connect(m_socket, &QTcpSocket::connected, this, &Sieci::onConnected);
         connect(m_socket, &QTcpSocket::disconnected, this, &Sieci::onDisconnected);
         connect(m_socket, &QTcpSocket::readyRead, this, &Sieci::onReadyRead);
-        connect(m_socket,
-                QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::errorOccurred),
-                this,
-                &Sieci::onError);
+        connect(m_socket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::errorOccurred), this, &Sieci::onError);
 }
 
-void Sieci::ustawOpcjeSocketu()
-{
+void Sieci::ustawOpcjeSocketu() {
         if (!m_socket)
                 return;
 
@@ -229,38 +200,33 @@ void Sieci::ustawOpcjeSocketu()
         m_socket->setSocketOption(QAbstractSocket::KeepAliveOption, 1);
 }
 
-void Sieci::onConnected()
-{
+void Sieci::onConnected() {
         ustawOpcjeSocketu();
         qDebug() << "Sieci: połączono z regulatorem";
         emit statusZmieniony("Obiekt: połączono z regulatorem");
         emit polaczono();
 }
 
-void Sieci::onDisconnected()
-{
+void Sieci::onDisconnected() {
         qDebug() << "Sieci: rozłączono";
         zakonczPolaczenie("Rozłączono");
 }
 
-void Sieci::onError(QAbstractSocket::SocketError)
-{
+void Sieci::onError(QAbstractSocket::SocketError) {
         const QString opis = m_socket ? m_socket->errorString() : QString("nieznany błąd");
         qDebug() << "Sieci: błąd -" << opis;
 
         zakonczPolaczenie(QString("Błąd sieci: %1").arg(opis));
 }
 
-void Sieci::zakonczPolaczenie(const QString &opis)
-{
+void Sieci::zakonczPolaczenie(const QString& opis) {
         czyscPolaczenie();
         m_tryb = Nieokreslony;
         emit statusZmieniony(opis);
         emit rozlaczono();
 }
 
-void Sieci::czyscPolaczenie()
-{
+void Sieci::czyscPolaczenie() {
         if (m_socket) {
                 m_socket->disconnect(this);
                 m_socket->abort();
@@ -273,8 +239,7 @@ void Sieci::czyscPolaczenie()
         m_bufor.clear();
 }
 
-void Sieci::wyslijKonfiguracje(const QJsonObject &konfig)
-{
+void Sieci::wyslijKonfiguracje(const QJsonObject& konfig) {
         if (!czyPolaczony())
                 return;
 
@@ -286,8 +251,7 @@ void Sieci::wyslijKonfiguracje(const QJsonObject &konfig)
         }
 }
 
-void Sieci::wyslijProbke(const QJsonObject &probka)
-{
+void Sieci::wyslijProbke(const QJsonObject& probka) {
         if (!czyPolaczony())
                 return;
 
@@ -299,8 +263,7 @@ void Sieci::wyslijProbke(const QJsonObject &probka)
         }
 }
 
-void Sieci::wyslijPakiet(TypPakietu typ, const QByteArray &payload)
-{
+void Sieci::wyslijPakiet(TypPakietu typ, const QByteArray& payload) {
         if (!czyPolaczony())
                 return;
 
@@ -316,8 +279,7 @@ void Sieci::wyslijPakiet(TypPakietu typ, const QByteArray &payload)
         m_socket->flush();
 }
 
-void Sieci::onReadyRead()
-{
+void Sieci::onReadyRead() {
         if (!m_socket)
                 return;
 
@@ -325,8 +287,7 @@ void Sieci::onReadyRead()
         parsujBufor();
 }
 
-void Sieci::parsujBufor()
-{
+void Sieci::parsujBufor() {
         const int ROZMIAR_NAGLOWKA = sizeof(quint8) + sizeof(quint32);
 
         while (m_bufor.size() >= ROZMIAR_NAGLOWKA) {
@@ -337,9 +298,8 @@ void Sieci::parsujBufor()
                 quint32 rozmiar;
                 in >> typ >> rozmiar;
 
-                if (m_bufor.size() < ROZMIAR_NAGLOWKA + (int) rozmiar) {
+                if (m_bufor.size() < ROZMIAR_NAGLOWKA + (int)rozmiar)
                         return;
-                }
 
                 QByteArray payload = m_bufor.mid(ROZMIAR_NAGLOWKA, rozmiar);
                 m_bufor.remove(0, ROZMIAR_NAGLOWKA + rozmiar);
@@ -357,9 +317,8 @@ void Sieci::parsujBufor()
                                 if (doc.isObject())
                                         probka = doc.object();
                         }
-                        if (!probka.isEmpty()) {
+                        if (!probka.isEmpty())
                                 emit odebranoProbke(probka);
-                        }
                 }
         }
 }
