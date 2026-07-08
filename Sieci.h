@@ -29,7 +29,7 @@ class Sieci : public QObject {
         Tryb get_tryb() const { return m_tryb; }
         bool czyPolaczony() const;
         QString opisPartnera() const;
-        void setSerializacja(Serializacja s) { m_serializacja = s; }
+        void setSerializacja(Serializacja s);
         Serializacja getSerializacja() const { return m_serializacja; }
 
        public slots:

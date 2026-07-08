@@ -134,6 +134,10 @@ QString Sieci::opisPartnera() const {
         return QString("%1:%2").arg(m_socket->peerAddress().toString()).arg(m_socket->peerPort());
 }
 
+void Sieci::setSerializacja(Serializacja s) {
+        m_serializacja = s;
+}
+
 void Sieci::set_tryb(Tryb tryb) {
         czyscPolaczenie();
         m_tryb = tryb;

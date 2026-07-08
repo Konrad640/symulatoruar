@@ -6,19 +6,18 @@
 // Ustaw na false, aby uruchomić GUI.
 #define RUN_TESTS_ONLY false
 
-int main(int argc, char *argv[])
-{
-    QApplication a(argc, argv);
+int main(int argc, char* argv[]) {
+        QApplication a(argc, argv);
 
-    if (RUN_TESTS_ONLY) {
-        TestRunner::runAllTests();
+        if (RUN_TESTS_ONLY) {
+                TestRunner::runAllTests();
 
-        return 0;
-    } else {
-        MainWindow w;
-        w.setWindowTitle("Symulator UAR");
-        w.resize(1600, 700);
-        w.show();
-        return a.exec();
-    }
+                return 0;
+        } else {
+                MainWindow w;
+                w.setWindowTitle("Symulator UAR");
+                w.resize(1600, 700);
+                w.show();
+                return a.exec();
+        }
 }

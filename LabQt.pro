@@ -1,4 +1,4 @@
-QT       += core gui network widgets charts
+QT += core gui network widgets charts
 
 CONFIG += c++17
 
@@ -9,24 +9,24 @@ CONFIG += c++17
 SOURCES += \
     Generator.cpp \
     KonfiguracjaARX.cpp \
+    main.cpp \
+    mainwindow.cpp \
     ModelARX.cpp \
     ProstyUAR.cpp \
     RegulatorPID.cpp \
     Sieci.cpp \
     TestRunner.cpp \
-    Testy_UAR.cpp \
-    main.cpp \
-    mainwindow.cpp
+    Testy_UAR.cpp
 
 HEADERS += \
     Generator.h \
     KonfiguracjaARX.h \
+    mainwindow.h \
     ModelARX.h \
     ProstyUAR.h \
     RegulatorPID.h \
     Sieci.h \
-    TestRunner.h \
-    mainwindow.h
+    TestRunner.h
 
 FORMS += \
     mainwindow.ui
